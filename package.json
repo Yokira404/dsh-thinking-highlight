@@ -9,6 +9,7 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
@@ -25,7 +26,6 @@
     },
     "client": {
       "platform": "web",
-      "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-ui-conversation"
       ]
@@ -33,6 +33,6 @@
   },
   "meta": {
     "title": "标红插件",
-    "description": "思维链关键词标红，思考行里显示提示词出现次数的徽章与高亮开关；设置里可改语言、插件开关、大小写与关键词颜色。"
+    "description": "思维链关键词标红，思考行里显示提示词出现次数的徽章与高亮开关；设置里有自己的分区，可改语言、插件开关、大小写与关键词颜色。"
   }
 }

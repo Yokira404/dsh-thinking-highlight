@@ -48,7 +48,8 @@ const body = await response.text()
 const expected = [
   'window.__ModuleLoader__.load',
   "id: '" + id + "'",
-  'settings.general.item',
+  'settings.section',
+  'settings.thinking-highlight.item',
   'matchSegments',
   'createTextNode',
   'data-dsh-th-eye',
