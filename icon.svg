@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Thinking Highlighter">
+  <rect x="4" y="10" width="56" height="44" rx="10" fill="#1d4ed8" opacity="0.12"/>
+  <rect x="4" y="10" width="56" height="44" rx="10" fill="none" stroke="#1d4ed8" stroke-width="3"/>
+  <rect x="13" y="21" width="24" height="7" rx="3.5" fill="#dc2626"/>
+  <rect x="13" y="34" width="38" height="6" rx="3" fill="#94a3b8"/>
+  <circle cx="47" cy="24.5" r="9" fill="none" stroke="#dc2626" stroke-width="3"/>
+  <circle cx="47" cy="24.5" r="3" fill="#dc2626"/>
+</svg>

@@ -1,0 +1,10 @@
+# Bundle layer for @local/dsh-thinking-highlight.
+#
+# Listing this package in the profile's dsh.profile.bundles makes DSH read this
+# patch and insert the row below, which loads the Host half. The Host half also
+# makes `dsh.client` visible to the client-modules scan, which serves
+# ./client.js to the browser.
+- insert:
+    - id: thinking-highlight
+      name: '@local/dsh-thinking-highlight'
+      config: {}
