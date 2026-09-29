@@ -1,5 +1,5 @@
 /**
- * Self-test for @local/dsh-thinking-highlight's client half.
+ * Self-test for @Yokira404/dsh-thinking-highlight's client half.
  *
  * The risky half of the plugin is DOM surgery on nodes React owns, so this test
  * extracts the shipped functions out of client.js by brace matching (never a
@@ -153,8 +153,12 @@ const ns = new Function(
   'DEFAULT_COLOR',
   [
     'const MAX_KEYWORDS = ' + constant('MAX_KEYWORDS'),
+    'const WORD_EDGE = ' + constant('WORD_EDGE'),
+    'const WORD_HEAD = ' + constant('WORD_HEAD'),
+    'const WORD_TAIL = ' + constant('WORD_TAIL'),
     'const marks = new WeakMap()',
     extract('escapeRegExp'),
+    extract('keywordBody'),
     extract('buildPattern'),
     extract('countMatches'),
     extract('toTint'),
@@ -281,6 +285,20 @@ const items = [
   check('valid hex passes through lowercased', ns.hex('#ABCDEF') === '#abcdef', ns.hex('#ABCDEF'), '#abcdef')
   check('garbage falls back to the default', ns.hex('javascript:alert(1)') === DEFAULT_COLOR, ns.hex('javascript:alert(1)'), DEFAULT_COLOR)
   check('undefined colour falls back', ns.hex(undefined) === DEFAULT_COLOR, ns.hex(undefined), DEFAULT_COLOR)
+}
+
+// 12. The whole-word lock: only matches that stand alone count.
+{
+  const loose = { id: 'w1', text: 'is', color: '#dc2626' }
+  const locked = { id: 'w2', text: 'is', color: '#dc2626', whole: true }
+  check('a plain keyword matches inside longer words', ns.countMatches('this is and this is not', loose, false) === 4, ns.countMatches('this is and this is not', loose, false), 4)
+  check('the whole-word lock drops the embedded ones', ns.countMatches('this is and this is not', locked, false) === 2, ns.countMatches('this is and this is not', locked, false), 2)
+  check('a digit next to it also blocks the match', ns.countMatches('is2 is', locked, false) === 1, ns.countMatches('is2 is', locked, false), 1)
+  check('letter case is irrelevant to the lock', ns.countMatches('ThisIs IS', locked, false) === 1, ns.countMatches('ThisIs IS', locked, false), 1)
+  check('punctuation still counts as a boundary', ns.countMatches('(is), is.', locked, false) === 2, ns.countMatches('(is), is.', locked, false), 2)
+  check('Chinese keywords are locked the same way', ns.countMatches('提示词汇 提示词', { id: 'w3', text: '提示词', color: '#dc2626', whole: true }, false) === 1, ns.countMatches('提示词汇 提示词', { id: 'w3', text: '提示词', color: '#dc2626', whole: true }, false), 1)
+  const mixed = ns.buildPattern([{ id: 'w4', text: 'and', color: '#dc2626', whole: true }, { id: 'w5', text: 'is', color: '#2563eb' }], false)
+  check('the lock is per keyword, not for the whole list', mixed !== null && 'brand is'.replace(mixed, '#') === 'brand #', mixed === null ? 'null' : 'brand is'.replace(mixed, '#'), 'brand #')
 }
 
 /* ─────────────────────────────── report ─────────────────────────────── */

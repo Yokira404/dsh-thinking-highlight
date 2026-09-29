@@ -1,8 +1,8 @@
 {
-  "name": "@local/dsh-thinking-highlight",
-  "version": "1.0.0",
+  "name": "@Yokira404/dsh-thinking-highlight",
+  "version": "1.1.0",
   "private": true,
-  "description": "Chain-of-thought keyword highlighting with a keyword-count chip, an eye toggle in the thinking row, and a settings row",
+  "description": "Chain-of-thought keyword counting and highlighting: per-word count chips with a click-to-suppress switch, per-word colour and text style, whole-word matching, and a dedicated settings section",
   "type": "module",
   "icon": "./icon.svg",
   "exports": {
@@ -18,7 +18,9 @@
     "cordis.patch.yml",
     "icon.svg",
     "locale/*.json",
-    "README.md"
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
   ],
   "dsh": {
     "bundle": {
@@ -33,6 +35,6 @@
   },
   "meta": {
     "title": "标红插件",
-    "description": "思维链关键词标红，思考行里显示提示词出现次数的徽章与高亮开关；设置里有自己的分区，可改语言、插件开关、大小写与关键词颜色。"
+    "description": "思考行的关键词统计与标红：标题行按词显示出现次数的徽章（点徽章就能单独开关这个词），展开后正文按词上色；每个词可设颜色、字体、加粗/斜体/下划线与「完整词」匹配，折叠的行按整段思维链计数。插件有独立的设置分区。"
   }
 }

@@ -48,17 +48,34 @@ symlinkSync(packageRoot, modulePath, 'junction')
 //    this profile keeps this shape instead of replacing it.
 const profile = JSON.parse(readFileSync(manifestPath, 'utf8'))
 profile.dependencies ??= {}
-profile.dependencies[packageName] = 'link:' + packageRoot.split(sep).join('/')
 profile.dsh ??= {}
 profile.dsh.profile ??= {}
 const bundles = profile.dsh.profile.bundles ?? (profile.dsh.profile.bundles = [])
-if (bundles.includes(packageName) === false) bundles.push(packageName)
+
+// 2a. A rename must not leave the old name behind: a stale bundle entry points at a
+//     package that no longer exists, and a stale dependency keeps the old link alive.
+const isThisPlugin = (name) => typeof name === 'string' && name.endsWith('/' + bare)
+const stale = [
+  ...bundles.filter((name) => name !== packageName && isThisPlugin(name)),
+  ...Object.keys(profile.dependencies).filter((name) => name !== packageName && isThisPlugin(name)),
+]
+for (const name of new Set(stale)) {
+  const [oldScope, oldBare] = name.split('/')
+  profile.dsh.profile.bundles = profile.dsh.profile.bundles.filter((entry) => entry !== name)
+  delete profile.dependencies[name]
+  const stalePath = join(profileDir, 'node_modules', oldScope, oldBare)
+  if (lstatSync(stalePath, { throwIfNoEntry: false }) !== undefined) rmSync(stalePath, { recursive: true, force: true })
+  console.log('removed the previous name ' + name)
+}
+
+profile.dependencies[packageName] = 'link:' + packageRoot.split(sep).join('/')
+if (profile.dsh.profile.bundles.includes(packageName) === false) profile.dsh.profile.bundles.push(packageName)
 writeFileSync(manifestPath, JSON.stringify(profile, null, 2) + '\n', 'utf8')
 
 console.log('linked ' + packageName + ' -> ' + modulePath)
 console.log('  target: ' + packageRoot)
 console.log('  dependency: ' + JSON.stringify(profile.dependencies))
-console.log('  bundles: ' + JSON.stringify(bundles))
+console.log('  bundles: ' + JSON.stringify(profile.dsh.profile.bundles))
 console.log('  profile page: 已安装 card with a switch; reload the page to see it')
 if (relative(profileDir, packageRoot).startsWith('..') === false) {
   console.log('  note: the linked directory sits inside the profile; a `file:` install would be safer there')

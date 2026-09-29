@@ -18,6 +18,14 @@ const bundle = readFileSync(join(here, '..', 'client.js'), 'utf8')
 
 /* - platform-module stubs - */
 
+/**
+ * Hook cells: a component that renders again must see the state it set, or a draft
+ * that commits on blur could never be tested. One cursor per render pass, reset when
+ * the page is rendered (see `renderPage`), which is what a mounted component sees.
+ */
+let hookCursor = 0
+const hookCells = []
+
 /** Minimal React: createElement, hooks, and the memo/Fragment surface used. */
 const React = {
   Fragment: Symbol('Fragment'),
@@ -27,7 +35,14 @@ const React = {
     return { type, props: props ?? {}, children }
   },
   useState(initial) {
-    return [typeof initial === 'function' ? initial() : initial, () => {}]
+    const at = hookCursor
+    hookCursor += 1
+    if (hookCells.length <= at || hookCells[at] === undefined) {
+      hookCells[at] = typeof initial === 'function' ? initial() : initial
+    }
+    return [hookCells[at], (next) => {
+      hookCells[at] = typeof next === 'function' ? next(hookCells[at]) : next
+    }]
   },
   useRef(initial) {
     return { current: initial }
@@ -401,7 +416,7 @@ const check = (name, pass, detail) => results.push({ name, pass: Boolean(pass), 
 // 1. The bundle registers exactly one factory under the plugin's own id.
 new Function('window', bundle)(globalThis.window)
 check('bundle registers a factory', pending !== null && typeof pending.factory === 'function', pending === null ? 'no registration' : String(pending.id))
-check('registration id is the package name', pending?.id === '@local/dsh-thinking-highlight', String(pending?.id))
+check('registration id is the package name', pending?.id === '@Yokira404/dsh-thinking-highlight', String(pending?.id))
 
 /*
  * Negative control: the stub must reject a registration that omits the target
@@ -652,6 +667,10 @@ if (runtime0() !== undefined) {
 function runtime0() {
   return globalThis.window.__DSH_TH__
 }
+/** The settings exactly as the page persists them. */
+function storedState() {
+  return JSON.parse(globalThis.window.localStorage.getItem('dsh-thinking-highlight.state.v1') ?? '{}')
+}
 /** Detach every child of a stub element the way the host's re-render detaches it. */
 function detachChildren(element) {
   for (const node of element.childNodes) {
@@ -683,6 +702,7 @@ function storeSettings(changes) {
  * page's own literal buttons are in the tree either way.
  */
 function pageNodes(expand = false) {
+  hookCursor = 0
   const tree = section().component({ renderSlot: () => null })
   const nodes = []
   const collect = (node) => {
@@ -693,7 +713,12 @@ function pageNodes(expand = false) {
     }
     if (typeof node !== 'object') return
     if (expand === true && typeof node.type === 'function') {
-      collect(node.type(node.props ?? {}))
+      /*
+       * React hands a component its children through props; the stub keeps them on the
+       * element, so put them back where the component looks for them.
+       */
+      const children = node.children ?? []
+      collect(node.type({ ...(node.props ?? {}), children: children.length > 1 ? children : children[0] }))
       return
     }
     nodes.push(node)
@@ -803,7 +828,7 @@ if (runtime0() !== undefined) {
   runtime0().pass()
 
   // 12. A chip is that keyword's switch: click off, click on.
-  const stored = () => JSON.parse(globalThis.window.localStorage.getItem('dsh-thinking-highlight.state.v1') ?? '{}')
+  const stored = storedState
   storeSettings({ muted: [], chipsWhenCollapsed: false })
   const chipsBeforeClick = chipsFor(row)
   check(
@@ -918,6 +943,141 @@ runtime0().pass()
 check('expanding the row does not change the numbers', runtime0().rows()[1]?.count === 4, 'count ' + String(runtime0().rows()[1]?.count))
 /* Leave the caps where the plugin found them. */
 storeSettings({ liftOnExpand: false })
+
+// 14. The whole-word lock, from the settings button through to the counts.
+storeSettings({
+  rows: [
+    { id: 'w-is', text: 'is', color: '#dc2626' },
+    { id: 'w-and', text: 'and', color: '#35c047' },
+  ],
+  muted: [],
+  chipsWhenCollapsed: true,
+})
+/* The folded row is the cheapest fixture with text of its own. */
+foldedRow['__reactFiber$stub'].return.memoizedProps.text = 'this is and this is not'
+runtime0().pass()
+check('a plain keyword counts the matches inside longer words', runtime0().rows()[1]?.count === 5, 'count ' + String(runtime0().rows()[1]?.count))
+clickSettings('whole')
+check('the whole-word button locks that keyword', runtime0().rows()[1]?.count === 3, 'count ' + String(runtime0().rows()[1]?.count))
+check('the lock is stored on the keyword itself', storedState().rows[0].whole === true, JSON.stringify(storedState().rows[0]))
+check(
+  'the chip count follows the lock',
+  chipsFor(foldedRow)[0]?.props?.['data-count'] === '2',
+  JSON.stringify(chipsFor(foldedRow).map((chip) => chip.props['data-count'])),
+)
+
+// 15. Bold / italic / underline / font ride the marks and the chip name.
+thinkBody.appendChild(new StubText('this is and'))
+runtime0().pass()
+const hitSpans = () => thinkBody.querySelectorAll('[data-dsh-th="hit"]')
+check(
+  'the locked keyword is only marked where it stands alone',
+  hitSpans().length === 2 && hitSpans().map((span) => span.text).join('|') === 'is|and',
+  'hits ' + hitSpans().map((span) => span.text).join('|'),
+)
+/*
+ * The style menu is a disclosure; a click is what opens it, and the stub's hook cells
+ * keep it open for the next render the way a mounted component would.
+ */
+const openNodes = (() => {
+  pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'style-menu').props.onClick({ preventDefault() {}, stopPropagation() {} })
+  return pageNodes(true)
+})()
+{
+  const markers = ['style-panel', 'font', 'style-b', 'style-i', 'style-u']
+  check(
+    'the style menu reveals colour, font and the three toggles',
+    markers.every((marker) => openNodes.some((node) => node.props?.['data-dsh-th'] === marker)),
+    JSON.stringify(markers.map((marker) => openNodes.filter((node) => node.props?.['data-dsh-th'] === marker).length)),
+  )
+  check(
+    'the panel no longer spends a line on the note',
+    openNodes.some((node) => node.props?.['data-dsh-th'] === 'whole-note') === false && openNodes.some((node) => node.props?.className === 'dsh-th-note') === false,
+    'note nodes ' + String(openNodes.filter((node) => node.props?.['data-dsh-th'] === 'whole-note').length),
+  )
+  /* The explanation the note used to carry still lives on the lock's own tooltip. */
+  const wholeButton = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'whole')
+  check(
+    'the whole-word lock explains itself on hover',
+    wholeButton !== undefined && String(wholeButton.props.title ?? '').length > 10,
+    JSON.stringify(String(wholeButton?.props?.title ?? '').slice(0, 24)),
+  )
+  openNodes.find((node) => node.props?.['data-dsh-th'] === 'font').props.onChange({ target: { value: 'mono' } })
+  for (const marker of ['style-b', 'style-i', 'style-u']) {
+    pageNodes(true).find((node) => node.props?.['data-dsh-th'] === marker).props.onClick({ preventDefault() {}, stopPropagation() {} })
+  }
+}
+runtime0().pass()
+const styledHit = hitSpans().find((span) => span.text === 'is')
+check(
+  'the mark carries the keyword text style',
+  styledHit !== undefined &&
+    styledHit.style.fontWeight === '600' &&
+    styledHit.style.fontStyle === 'italic' &&
+    styledHit.style.textDecoration === 'underline' &&
+    styledHit.style.fontFamily === 'var(--ds-font-family-code)',
+  JSON.stringify(styledHit?.style),
+)
+const plainHit = hitSpans().find((span) => span.text === 'and')
+check(
+  'a keyword without a style gets no extra style',
+  plainHit !== undefined && plainHit.style.fontWeight === undefined && plainHit.style.fontStyle === undefined,
+  JSON.stringify(plainHit?.style),
+)
+check(
+  'the chip name previews the same style',
+  chipsFor(row)[0]?.children?.[0]?.props?.style?.fontWeight === '600',
+  JSON.stringify(chipsFor(row)[0]?.children?.[0]?.props?.style),
+)
+check('the style is stored with the keyword', storedState().rows[0].bold === true && storedState().rows[0].font === 'mono', JSON.stringify(storedState().rows[0]))
+
+// 16. Two identical keywords can never coexist.
+storeSettings({
+  rows: [
+    { id: 'd-is', text: 'is', color: '#dc2626' },
+    { id: 'd-and', text: 'and', color: '#35c047' },
+  ],
+  caseSensitive: false,
+  muted: [],
+})
+const fields = () => pageNodes(true).filter((node) => node.props?.['data-dsh-th'] === 'text')
+const typeInto = (at, value) => {
+  fields()[at].props.onChange({ target: { value } })
+  const rendered = fields()[at]
+  return () => rendered.props.onBlur()
+}
+const texts = () => runtime0().settings().rows.map((row) => row.text).join('|')
+typeInto(1, 'is')()
+check('typing a keyword that already exists is refused', texts() === 'is|and', texts())
+check('the refused row says why it did not change', pageNodes(true).some((node) => node.props?.['data-dsh-th'] === 'duplicate' && String((node.children ?? [])[0] ?? '').includes('is')), JSON.stringify(pageNodes(true).filter((node) => node.props?.['data-dsh-th'] === 'duplicate').map((node) => (node.children ?? [])[0])))
+typeInto(1, 'IS')()
+check('with case-insensitive matching, IS is the same word', texts() === 'is|and', texts())
+typeInto(1, 'but')()
+check('a genuinely different keyword still goes through', texts() === 'is|but', texts())
+storeSettings({ caseSensitive: true })
+typeInto(1, 'IS')()
+check('with case-sensitive matching, IS is its own keyword', texts() === 'is|IS', texts())
+/* State that arrives with duplicates (an older build, a hand-edited store) is cleaned. */
+storeSettings({
+  rows: [
+    { id: 'x1', text: 'is', color: '#dc2626' },
+    { id: 'x2', text: ' is ', color: '#2563eb' },
+    { id: 'x3', text: 'and', color: '#35c047' },
+  ],
+  caseSensitive: false,
+})
+check('stored duplicates are deduplicated, first one wins', texts() === 'is|and', texts())
+
+// 17. The case switch does what its label says: turning it on makes matching picky.
+storeSettings({ rows: [{ id: 'c1', text: 'is', color: '#dc2626' }], caseSensitive: false, muted: [] })
+foldedRow['__reactFiber$stub'].return.memoizedProps.text = 'IS is'
+runtime0().pass()
+check('with the switch off, is also matches IS', runtime0().rows()[1]?.count === 2, 'count ' + String(runtime0().rows()[1]?.count))
+clickSettings('switch-case')
+check('turning the switch on makes matching case-sensitive', runtime0().rows()[1]?.count === 1, 'count ' + String(runtime0().rows()[1]?.count))
+check('the switch is stored as caseSensitive', storedState().caseSensitive === true, JSON.stringify(storedState().caseSensitive))
+clickSettings('switch-case')
+check('turning it back off restores case-insensitive matching', runtime0().rows()[1]?.count === 2, 'count ' + String(runtime0().rows()[1]?.count))
 
 let failed = 0
 for (const result of results) {

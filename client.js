@@ -1,5 +1,5 @@
 /**
- * Client half of @local/dsh-thinking-highlight.
+ * Client half of @Yokira404/dsh-thinking-highlight.
  *
  * Two contributions, both registered inside `apply` so unloading the plugin
  * removes them:
@@ -20,7 +20,7 @@
  *     meets a foreign child element.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-thinking-highlight',
+  id: '@Yokira404/dsh-thinking-highlight',
   factory(require) {
     const React = require('react')
     const ReactDOMClient = require('react-dom/client')
@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.0'
+    const VERSION = '1.1.0'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -36,6 +36,8 @@ window.__ModuleLoader__.load({
     const DEFAULT_KEYWORDS = ['提示词', '但']
     const DEFAULT_COLOR = '#dc2626'
     const TINT_ALPHA = 0.24
+    /** Typefaces a keyword can ask for; `default` keeps whatever the host uses. */
+    const FONTS = ['default', 'mono', 'serif']
     /** Upper bound on active keywords, so one wild pattern can never be built. */
     const MAX_KEYWORDS = 200
 
@@ -72,7 +74,7 @@ window.__ModuleLoader__.load({
          * edited, and pruned whenever its row is gone.
          */
         muted: [],
-        rows: DEFAULT_KEYWORDS.map((text) => ({ id: nextRowId(), text, color: DEFAULT_COLOR })),
+        rows: DEFAULT_KEYWORDS.map((text) => freshRow(text)),
       }
     }
 
@@ -99,7 +101,41 @@ window.__ModuleLoader__.load({
         id: typeof row?.id === 'string' && row.id ? row.id : 'kw-restored-' + index,
         text: typeof row?.text === 'string' ? row.text : '',
         color: hex(row?.color),
+        /* Whole-word matching: a keyword sitting inside a longer word is not a hit. */
+        whole: row?.whole === true,
+        font: FONTS.includes(row?.font) ? row.font : 'default',
+        bold: row?.bold === true,
+        italic: row?.italic === true,
+        underline: row?.underline === true,
       }
+    }
+
+    /** One keyword row with every field the settings page can set. */
+    function freshRow(text) {
+      return screenRow({ id: nextRowId(), text, color: DEFAULT_COLOR }, 0)
+    }
+
+    /**
+     * What counts as "the same keyword": the text the matcher actually compares —
+     * trimmed, and case-folded while matching ignores case, because `is` and `IS`
+     * would then be two words that hit exactly the same places. Two keywords sharing
+     * a key can never coexist: the settings page refuses the edit, stored state is
+     * deduplicated on load, and the pass would ignore the later one anyway.
+     */
+    function keywordKey(text, caseSensitive) {
+      const trimmed = typeof text === 'string' ? text.trim() : ''
+      return caseSensitive === true ? trimmed : trimmed.toLowerCase()
+    }
+
+    /** The duplicate of `candidate` among `rows` (that row's text), or null. */
+    function duplicateOf(rows, candidate, ownId, caseSensitive) {
+      const key = keywordKey(candidate, caseSensitive)
+      if (key === '') return null
+      for (const row of rows) {
+        if (row.id === ownId) continue
+        if (keywordKey(row.text, caseSensitive) === key) return row.text
+      }
+      return null
     }
 
     /** One id in or out of a list, as a new array; both toggles share this. */
@@ -121,6 +157,15 @@ window.__ModuleLoader__.load({
       base.liftOnExpand = raw.liftOnExpand === true
       const stored = Array.isArray(raw.rows) ? raw.rows : []
       if (stored.length > 0) base.rows = stored.slice(0, MAX_KEYWORDS).map(screenRow)
+      /* Older state (or a hand-edited one) may hold duplicates; the first one wins. */
+      const seen = new Set()
+      base.rows = base.rows.filter((row) => {
+        const key = keywordKey(row.text, base.caseSensitive)
+        if (key === '') return true
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
       /* A keyword that no longer exists cannot stay muted. */
       base.muted = (Array.isArray(raw.muted) ? raw.muted : []).filter(
         (id) => typeof id === 'string' && base.rows.some((row) => row.id === id),
@@ -193,12 +238,17 @@ window.__ModuleLoader__.load({
         title: '标红插件',
         lead: '统计思考行里出现的提示词并在思维链中标红；右侧眼睛按钮控制这一行的高亮显示。',
         language: '语言',
+        languageHint: '插件界面语言；左侧导航那一行的名字也跟着变',
         enabled: '插件开关',
-        caseSensitive: '不区分大小写',
+        enabledHint: '一键隐藏全部颜色、徽章与标红',
+        caseSensitive: '区分大小写',
+        caseSensitiveHint: '关掉时 is 也会命中 IS；打开后只有大小写完全一致才算。',
         chipsWhenCollapsed: '折叠时显示标注',
+        chipsWhenCollapsedHint: '折叠的思考行是否显示徽章与眼睛',
         liftOnExpand: '展开时撑开思考框',
         liftOnExpandHint: '默认关闭。DSH 把一轮的过程收进一个最高 400px、可滚动的框里；如果你展开的思考被这个框截断（后面的内容要框内滚动才看得到），打开这一项，插件会在展开时临时去掉那个高度上限。',
-        keywords: '提示词与颜色',
+        keywords: '提示词',
+        keywordsHint: '一行一个词；右侧的图标里是这个词的颜色与样式',
         version: '版本',
         add: '添加提示词',
         remove: '删除',
@@ -210,21 +260,41 @@ window.__ModuleLoader__.load({
         rowToggle: '这一行的高亮显示',
         chipMute: '点击关闭这个词的标红',
         chipUnmute: '已关闭，点击恢复这个词的标红',
+        duplicate: '已经有一条一样的关键词了，这条没有改动：',
+        duplicateHint: '同一个词只留一条（关掉「区分大小写」时 is 与 IS 算同一个词）。',
         mute: '抑制',
         unmute: '已抑制',
         muteHint: '抑制后这个词不再标红，徽章保留（对话里点徽章也是同一个开关）',
+        whole: '完整词',
+        wholeHint: '只标注作为完整词出现的匹配：前后紧挨着字母或数字的不算（勾上以后 is 不会命中 this，也不会命中 ThisIs）。',
+        styleMenu: '样式设置',
+        styleMenuHint: '颜色、字体、加粗、斜体、下划线',
+        style: '样式',
+        colorLabel: '颜色',
+        font: '字体',
+        fontDefault: '默认',
+        fontMono: '等宽',
+        fontSerif: '衬线',
+        bold: '加粗',
+        italic: '斜体',
+        underline: '下划线',
       },
       en: {
         nav: 'Thinking Highlighter',
         title: 'Thinking Highlighter',
         lead: 'Counts the keywords below inside thinking rows and highlights them in the chain of thought; the eye button on the right toggles highlighting for that row.',
         language: 'Language',
+        languageHint: 'The plugin’s own language; its nav row follows too',
         enabled: 'Plugin',
-        caseSensitive: 'Match case',
+        enabledHint: 'Hide every colour, chip and highlight at once',
+        caseSensitive: 'Case sensitive',
+        caseSensitiveHint: 'Off, is also matches IS; on, only an exact case match counts.',
         chipsWhenCollapsed: 'Chips when collapsed',
+        chipsWhenCollapsedHint: 'Whether a folded row shows its chips and eye',
         liftOnExpand: 'Expand lifts the box',
         liftOnExpandHint: 'Off by default. DSH folds one turn’s process into a scroll box capped at 400px; if an expanded row is clipped by it, turn this on and the plugin drops that cap while a row is open.',
-        keywords: 'Keywords and colors',
+        keywords: 'Keywords',
+        keywordsHint: 'One word per row; the icon on the right holds its colour and text style',
         version: 'version',
         add: 'Add keyword',
         remove: 'Remove',
@@ -236,9 +306,24 @@ window.__ModuleLoader__.load({
         rowToggle: 'Highlighting for this row',
         chipMute: 'Click to stop highlighting this keyword',
         chipUnmute: 'Off — click to highlight this keyword again',
+        duplicate: 'A keyword with the same text already exists — this row was left unchanged:',
+        duplicateHint: 'One row per word (with “Case sensitive” off, is and IS are the same word).',
         mute: 'Suppress',
         unmute: 'Suppressed',
         muteHint: 'A suppressed keyword stops being highlighted; its chips stay in place (the chips in the transcript are the same switch)',
+        whole: 'Whole word',
+        wholeHint: 'Only matches that stand alone count: a keyword with a letter or digit right next to it is ignored (with this on, is never matches this or ThisIs).',
+        styleMenu: 'Text style',
+        styleMenuHint: 'Color, font, bold, italic, underline',
+        style: 'Style',
+        colorLabel: 'Color',
+        font: 'Font',
+        fontDefault: 'Default',
+        fontMono: 'Monospace',
+        fontSerif: 'Serif',
+        bold: 'Bold',
+        italic: 'Italic',
+        underline: 'Underline',
       },
     }
 
@@ -297,49 +382,81 @@ window.__ModuleLoader__.load({
 .dsh-th-eye:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .dsh-th-body .dsh-th-hit{border-radius:3px}
 [data-dsh-hl="off"] .dsh-th-body .dsh-th-hit{background-color:transparent !important}
-.dsh-th-section{display:flex;flex-direction:column;gap:12px;max-width:760px;color:var(--dsw-alias-label-primary)}
-.dsh-th-head{display:flex;flex-direction:column;gap:4px}
+/*
+ * The settings page follows the host's own settings rows (the .PgWN5G_row rule in
+ * @deepseek-ai/dsh-client-ui-settings-general, mirrored here): label and description
+ * stacked on the left, the control on the right, and a hairline under every row.
+ * Controls use the host's filled look — a light fill instead of an outline — so the
+ * page reads as part of the settings shell rather than a form inside it.
+ */
+.dsh-th-section{display:flex;flex-direction:column;max-width:760px;color:var(--dsw-alias-label-primary)}
+.dsh-th-head{display:flex;flex-direction:column;gap:4px;padding-bottom:8px}
 .dsh-th-heading{display:flex;align-items:center;gap:8px;margin:0;font-size:18px;font-weight:600;line-height:26px}
-.dsh-th-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}
-.dsh-th-group{display:flex;flex-direction:column;gap:16px;padding:2px 0 4px}
+.dsh-th-intro{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dsh-th-group{display:flex;flex-direction:column}
+.dsh-th-setrow{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.dsh-th-setlabel{display:flex;flex-direction:column;min-width:0}
+.dsh-th-settitle{font-size:14px;line-height:20px}
+.dsh-th-setdesc{margin-top:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
 .dsh-th-tag{padding:0 6px;border-radius:6px;font-size:11px;line-height:18px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-hover);font-variant-numeric:tabular-nums}
-.dsh-th-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.dsh-th-stack{display:flex;flex-direction:column;gap:4px}
-.dsh-th-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
-.dsh-th-label{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary)}
-.dsh-th-seg{display:inline-flex;padding:2px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover)}
-.dsh-th-seg-item{padding:3px 12px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;cursor:pointer}
-.dsh-th-seg-item[data-on]{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+.dsh-th-seg{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-th-seg-item{padding:5px 14px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
+.dsh-th-seg-item[data-on]{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-shadow:0 1px 2px rgb(0 0 0 / 6%)}
 .dsh-th-seg-item:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
-.dsh-th-switch{position:relative;flex:none;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer}
+.dsh-th-switch{position:relative;flex:none;width:40px;height:22px;padding:2px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer;transition:background-color 120ms ease}
 .dsh-th-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary)}
 .dsh-th-switch:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-.dsh-th-knob{display:block;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-label-primary-foreground);transition:transform 120ms ease}
-.dsh-th-switch[aria-checked="false"] .dsh-th-knob{background:var(--dsw-alias-switch-thumb)}
-.dsh-th-switch[aria-checked="true"] .dsh-th-knob{transform:translateX(16px)}
-.dsh-th-hr{height:1px;background:var(--dsw-alias-border-l1)}
-.dsh-th-kws{display:flex;flex-direction:column;gap:8px}
-.dsh-th-kw{display:flex;align-items:center;gap:8px}
-.dsh-th-input{flex:1;min-width:0;height:32px;padding:0 10px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;outline:none}
+.dsh-th-knob{display:block;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-switch-thumb,var(--dsw-alias-label-primary-foreground));box-shadow:0 1px 2px rgb(0 0 0 / 18%);transition:transform 120ms ease}
+.dsh-th-switch[aria-checked="true"] .dsh-th-knob{transform:translateX(18px)}
+.dsh-th-grouphead{padding-top:4px}
+.dsh-th-kws{display:flex;flex-direction:column}
+.dsh-th-kw{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.dsh-th-kwrow{display:flex;align-items:center;gap:8px}
+.dsh-th-input{flex:1;min-width:0;height:36px;padding:0 12px;border:0.5px solid transparent;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;outline:none}
 .dsh-th-input:focus{border-color:var(--dsw-alias-state-business-primary)}
 .dsh-th-input::placeholder{color:var(--dsw-alias-label-dimmed)}
-.dsh-th-color{position:relative;display:inline-flex;flex:none;align-items:center;gap:6px;height:32px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);cursor:pointer}
+.dsh-th-input[aria-invalid="true"]{border-color:var(--dsw-alias-state-error-primary)}
+/* The disclosure that hides colour and text styling behind one icon. */
+.dsh-th-disc{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;padding:0;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-th-disc:hover{color:var(--dsw-alias-label-primary)}
+.dsh-th-disc[aria-expanded="true"]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.dsh-th-disc:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-disc svg{transition:transform 120ms ease}
+.dsh-th-disc[aria-expanded="true"] svg{transform:rotate(90deg)}
+/* Whole-word lock: the slot the colour used to sit in. */
+.dsh-th-whole{flex:none;height:36px;padding:0 14px;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
+.dsh-th-whole:hover{color:var(--dsw-alias-label-primary)}
+.dsh-th-whole[aria-pressed="true"]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.dsh-th-whole:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+/* The open style panel: a slightly darker surface, so it reads as its own sheet. */
+.dsh-th-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;background:var(--dsw-alias-bg-module-platform,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-panelLabel{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dsh-th-select{height:32px;padding:0 8px;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.dsh-th-select:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-style{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:13px;line-height:18px;cursor:pointer}
+.dsh-th-style[aria-pressed="true"]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.dsh-th-style:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-styleB{font-weight:700}
+.dsh-th-styleI{font-style:italic}
+.dsh-th-styleU{text-decoration:underline}
+.dsh-th-color{position:relative;display:inline-flex;flex:none;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);cursor:pointer}
 .dsh-th-swatch{position:absolute;inset:0;width:100%;height:100%;opacity:0;padding:0;border:0;cursor:pointer}
 .dsh-th-dot{width:14px;height:14px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2)}
-.dsh-th-hex{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
-.dsh-th-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}
+.dsh-th-hex{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.dsh-th-mute{flex:none;height:36px;padding:0 14px;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
+.dsh-th-mute:hover{color:var(--dsw-alias-label-primary)}
+.dsh-th-mute[aria-pressed="true"]{background:transparent;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l2);color:var(--dsw-alias-label-dimmed)}
+.dsh-th-mute:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:36px;height:36px;padding:0;border:0;border-radius:10px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer}
 .dsh-th-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary)}
 .dsh-th-icon:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-warn{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-label,var(--dsw-alias-state-error-primary))}
 .dsh-th-empty{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
-.dsh-th-mute{flex:none;padding:4px 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;cursor:pointer}
-.dsh-th-mute:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.dsh-th-mute[aria-pressed="true"]{border-style:dashed;border-color:var(--dsw-alias-border-l3);color:var(--dsw-alias-label-dimmed)}
-.dsh-th-mute:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
-.dsh-th-foot{display:flex;align-items:center;gap:8px}
-.dsh-th-add{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:0.5px dashed var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;cursor:pointer}
-.dsh-th-add:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}
+.dsh-th-foot{display:flex;align-items:center;gap:8px;padding-top:16px}
+.dsh-th-add{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
+.dsh-th-add:hover{background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
 .dsh-th-add:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
-.dsh-th-reset{margin-left:auto;padding:5px 10px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;cursor:pointer}
+.dsh-th-reset{margin-left:auto;height:36px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
 .dsh-th-reset:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 `
 
@@ -365,6 +482,22 @@ window.__ModuleLoader__.load({
     }
 
     /* ────────────────────────────── icons ─────────────────────────────── */
+
+    /** The disclosure chevron; the stylesheet turns it a quarter when open. */
+    function ChevronIcon() {
+      return React.createElement(
+        'svg',
+        { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': 'true', focusable: 'false' },
+        React.createElement('path', {
+          d: 'M6 3.5 10.5 8 6 12.5',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      )
+    }
 
     function EyeIcon(props) {
       const children = [
@@ -411,8 +544,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function TrashIcon() {
-      return React.createElement(
+    function TrashIcon() {      return React.createElement(
         'svg',
         { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': 'true', focusable: 'false' },
         React.createElement('path', {
@@ -433,26 +565,61 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * What may sit next to a whole-word keyword: letters, digits and underscore are
+     * "still inside a word". `is` then stops matching `this`, and a Chinese keyword
+     * only matches where it is not glued to more characters.
+     */
+    const WORD_EDGE = '[\\p{L}\\p{N}_]'
+    const WORD_HEAD = '(?<!' + WORD_EDGE + ')'
+    const WORD_TAIL = '(?!' + WORD_EDGE + ')'
+
+    /** One keyword as a pattern body, bounded when the reader locked it to whole words. */
+    function keywordBody(item) {
+      const escaped = escapeRegExp(item.text)
+      return item.whole === true ? WORD_HEAD + escaped + WORD_TAIL : escaped
+    }
+
+    /**
      * One combined pattern for the whole keyword list, longest keyword first so
      * an overlapping shorter one cannot win. A fresh stateful RegExp per node,
      * because `lastIndex` lives on the instance.
+     *
+     * `u` is required by the lookarounds of a whole-word keyword, and is safe for
+     * the rest because every keyword is escaped.
      */
     function buildPattern(items, caseSensitive) {
       const active = items.filter((item) => item.text.length > 0).slice(0, MAX_KEYWORDS)
       if (active.length === 0) return null
       const ordered = [...active].sort((left, right) => right.text.length - left.text.length)
-      return new RegExp(ordered.map((item) => '(' + escapeRegExp(item.text) + ')').join('|'), caseSensitive ? 'g' : 'gi')
+      return new RegExp(ordered.map((item) => '(' + keywordBody(item) + ')').join('|'), caseSensitive ? 'gu' : 'giu')
     }
 
     function countMatches(text, item, caseSensitive) {
       if (!text || !item.text) return 0
-      const pattern = new RegExp(escapeRegExp(item.text), caseSensitive ? 'g' : 'gi')
+      const pattern = new RegExp('(' + keywordBody(item) + ')', caseSensitive ? 'gu' : 'giu')
       let count = 0
       while (pattern.exec(text) !== null) {
         count += 1
         if (count >= 5000 || pattern.lastIndex === 0) break
       }
       return count
+    }
+
+    /**
+     * The extra inline style one keyword's marks carry — bold, italic, underline,
+     * the typeface — or null when the keyword asks for none. The chip's name uses
+     * the same object, so what a keyword looks like is visible before you open a row.
+     * The color is deliberately not part of it: that one rides the frame and the tint.
+     */
+    function markStyle(item) {
+      if (item === undefined || item === null) return null
+      const style = {}
+      if (item.bold === true) style.fontWeight = '600'
+      if (item.italic === true) style.fontStyle = 'italic'
+      if (item.underline === true) style.textDecoration = 'underline'
+      if (item.font === 'mono') style.fontFamily = 'var(--ds-font-family-code)'
+      else if (item.font === 'serif') style.fontFamily = 'Georgia, "Times New Roman", serif'
+      return Object.keys(style).length === 0 ? null : style
     }
 
     function toTint(color, alpha) {
@@ -750,7 +917,7 @@ window.__ModuleLoader__.load({
                 if (typeof options.onToggleKeyword === 'function') options.onToggleKeyword(item.id)
               },
             },
-            React.createElement('span', { className: 'dsh-th-badge-name' }, item.text),
+            React.createElement('span', { className: 'dsh-th-badge-name', style: markStyle(item) ?? undefined }, item.text),
             React.createElement('span', { className: 'dsh-th-badge-x' }, '×'),
             React.createElement('span', { className: 'dsh-th-count' }, String(item.count)),
           ),
@@ -815,8 +982,27 @@ window.__ModuleLoader__.load({
         entry.mountParent = seat.parent
       }
       entry.counts = counts
+      /*
+       * The key covers everything a chip shows: its count, its off state, and the text
+       * style its name previews — otherwise a style change would leave the chip
+       * looking the way it did until something else happened to change.
+       */
       const key =
-        counts.map((item) => item.id + ':' + item.count + (item.muted === true ? '!' : '')).join('|') + '#' + String(entry.highlighted === true)
+        counts
+          .map(
+            (item) =>
+              item.id +
+              ':' +
+              item.count +
+              (item.muted === true ? '!' : '') +
+              (item.bold === true ? 'B' : '') +
+              (item.italic === true ? 'I' : '') +
+              (item.underline === true ? 'U' : '') +
+              String(item.font ?? ''),
+          )
+          .join('|') +
+        '#' +
+        String(entry.highlighted === true)
       if (entry.mountKey === key && entry.mount.childElementCount === children.length) return
       entry.mountKey = key
       paintBadges(entry, children, options.labels)
@@ -886,7 +1072,7 @@ window.__ModuleLoader__.load({
      * record holds the emptied node, its original value, and every node the
      * rebuild inserted, which is what `unwrapBody` removes again.
      */
-    function wrapNode(node, body, items, caseSensitive, tintFor) {
+    function wrapNode(node, body, items, caseSensitive, tintFor, styleFor) {
       const value = node.nodeValue
       if (!value) return 0
       const segments = matchSegments(value, items, caseSensitive)
@@ -902,6 +1088,11 @@ window.__ModuleLoader__.load({
           span.className = 'dsh-th-hit'
           span.setAttribute(MARK, 'hit')
           span.style.backgroundColor = tintFor(segment.text)
+          /* Optional second half: the keyword's own bold / italic / underline / font. */
+          const extra = typeof styleFor === 'function' ? styleFor(segment.text) : null
+          if (extra !== null && extra !== undefined) {
+            for (const name of Object.keys(extra)) span.style[name] = extra[name]
+          }
           span.textContent = segment.text
           parent.insertBefore(span, node)
           inserted.push(span)
@@ -1019,13 +1210,35 @@ window.__ModuleLoader__.load({
       if (patternChanged === true) entry.bodyKey = undefined
 
       const colors = {}
+      const styles = {}
       const counts = []
+      /*
+       * Case-insensitive matching hands the *matched* text to the lookups, which may
+       * be cased differently from the keyword, so both maps are keyed the way the
+       * match is keyed — otherwise `IS` would fall back to the default color.
+       */
+      const keyOf = (word) => (options.caseSensitive === true ? word : word.toLowerCase())
       if (options.enabled === true) {
         for (const item of options.items) {
           if (item.text.length === 0) continue
-          colors[item.text] = item.color
+          const key = keyOf(item.text)
+          colors[key] = item.color
+          styles[key] = item
           const count = countMatches(counted, item, options.caseSensitive)
-          if (count > 0) counts.push({ id: item.id, text: item.text, count, color: item.color, muted: item.muted === true })
+          if (count > 0) {
+            counts.push({
+              id: item.id,
+              text: item.text,
+              count,
+              color: item.color,
+              muted: item.muted === true,
+              whole: item.whole === true,
+              font: item.font,
+              bold: item.bold === true,
+              italic: item.italic === true,
+              underline: item.underline === true,
+            })
+          }
         }
       }
       entry.count = counts.reduce((total, item) => total + item.count, 0)
@@ -1073,7 +1286,8 @@ window.__ModuleLoader__.load({
        * switched off is not merely invisible: the text itself stops being split.
        */
       const active = options.items.filter((item) => item.muted !== true)
-      const tintFor = (word) => toTint(colors[word] ?? DEFAULT_COLOR, TINT_ALPHA)
+      const tintFor = (word) => toTint(colors[keyOf(word)] ?? DEFAULT_COLOR, TINT_ALPHA)
+      const styleFor = (word) => markStyle(styles[keyOf(word)])
       const stack = [body]
       while (stack.length > 0) {
         const element = stack.pop()
@@ -1089,7 +1303,7 @@ window.__ModuleLoader__.load({
           child = child.nextElementSibling
         }
         for (const node of [...element.childNodes]) {
-          if (node.nodeType === 3) wrapNode(node, body, active, options.caseSensitive, tintFor)
+          if (node.nodeType === 3) wrapNode(node, body, active, options.caseSensitive, tintFor, styleFor)
         }
       }
       entry.sample = sampleMark(body)
@@ -1123,9 +1337,37 @@ window.__ModuleLoader__.load({
         const settings = handle.settings()
         const labels = dict(settings.lang)
         const muted = new Set(settings.muted)
-        const items = settings.rows.map((row) => ({ id: row.id, text: row.text.trim(), color: row.color, muted: muted.has(row.id) }))
+        /*
+         * A duplicate never takes effect: the settings page refuses to create one and
+         * loading deduplicates, so this only guards state that arrived some other way.
+         * The first row with a given key is the one that counts.
+         */
+        const seen = new Set()
+        const items = []
+        for (const row of settings.rows) {
+          const key = keywordKey(row.text, settings.caseSensitive)
+          if (key !== '') {
+            if (seen.has(key)) continue
+            seen.add(key)
+          }
+          items.push({
+            id: row.id,
+            text: row.text.trim(),
+            color: row.color,
+            muted: muted.has(row.id),
+            whole: row.whole === true,
+            font: row.font,
+            bold: row.bold === true,
+            italic: row.italic === true,
+            underline: row.underline === true,
+          })
+        }
+        /*
+         * Everything that changes how a hit looks belongs in the key: a changed key is
+         * what tells every row to drop its body cache and mark the text again.
+         */
         const patternKey =
-          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + items.map((item) => item.id + '=' + item.text + item.color).join(',')
+          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + items.map((item) => item.id + '=' + item.text + item.color + (item.whole === true ? 'W' : '') + (item.bold === true ? 'B' : '') + (item.italic === true ? 'I' : '') + (item.underline === true ? 'U' : '') + item.font).join(',')
         /*
          * What a chip click does: one keyword in or out of the muted list, persisted
          * like any other setting. Every row hears about it on the next pass, so a
@@ -1202,6 +1444,8 @@ window.__ModuleLoader__.load({
           type: 'button',
           className: 'dsh-th-switch',
           role: 'switch',
+          /* Named so a test can drive this exact switch instead of counting them. */
+          'data-dsh-th': props.marker,
           'aria-checked': props.checked ? 'true' : 'false',
           'aria-label': props.label,
           title: props.label,
@@ -1211,72 +1455,178 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * One settings row, in the host's own shape: the label with its description
+     * stacked on the left and the control on the right (see `.dsh-th-setrow`).
+     */
     function SettingRow(props) {
-      const label = React.createElement('span', { className: 'dsh-th-label' }, props.label)
-      if (props.hint === undefined) {
-        return React.createElement('div', { className: 'dsh-th-row' }, label, props.children)
-      }
       return React.createElement(
         'div',
-        { className: 'dsh-th-stack' },
-        React.createElement('div', { className: 'dsh-th-row' }, label, props.children),
-        React.createElement('p', { className: 'dsh-th-hint' }, props.hint),
+        { className: 'dsh-th-setrow' },
+        React.createElement(
+          'div',
+          { className: 'dsh-th-setlabel' },
+          React.createElement('span', { className: 'dsh-th-settitle' }, props.label),
+          props.hint === undefined ? null : React.createElement('span', { className: 'dsh-th-setdesc' }, props.hint),
+        ),
+        props.children,
       )
     }
 
+    /**
+     * One keyword: its text, the whole-word lock, the suppress switch, and — behind a
+     * disclosure icon — everything about how its hits look. The disclosure sits left
+     * of the lock, so the row's own line keeps only what is used constantly.
+     *
+     * The text field keeps a draft while it is being typed in and commits on blur or
+     * Enter: that is what lets a refused edit (a duplicate keyword) put the old text
+     * back instead of fighting every keystroke.
+     */
     function KeywordRow(props) {
       const row = props.row
+      const [open, setOpen] = React.useState(false)
+      const [draft, setDraft] = React.useState(null)
+      const value = draft === null ? row.text : draft
+      const commit = () => {
+        if (draft === null) return
+        props.onCommitText(draft)
+        setDraft(null)
+      }
+      const styleOf = (letter, field, value, label) =>
+        React.createElement(
+          'button',
+          {
+            type: 'button',
+            className: 'dsh-th-style dsh-th-style' + letter,
+            'data-dsh-th': 'style-' + letter.toLowerCase(),
+            'aria-pressed': value === true ? 'true' : 'false',
+            'aria-label': label,
+            title: label,
+            onClick: () => props.onStyle({ [field]: value !== true }),
+          },
+          letter,
+        )
       return React.createElement(
         'div',
         { className: 'dsh-th-kw', 'data-dsh-th': 'kw' },
-        React.createElement('input', {
-          className: 'dsh-th-input',
-          type: 'text',
-          value: row.text,
-          spellCheck: false,
-          placeholder: props.placeholder,
-          'aria-label': props.placeholder,
-          onChange: (event) => props.onText(event.target.value),
-        }),
         React.createElement(
-          'label',
-          { className: 'dsh-th-color', title: row.color },
+          'div',
+          { className: 'dsh-th-kwrow' },
           React.createElement('input', {
-            className: 'dsh-th-swatch',
-            type: 'color',
-            value: row.color,
-            'aria-label': props.colorLabel,
-            onChange: (event) => props.onColor(event.target.value),
+            className: 'dsh-th-input',
+            type: 'text',
+            value,
+            spellCheck: false,
+            placeholder: props.placeholder,
+            'aria-label': props.placeholder,
+            'data-dsh-th': 'text',
+            'aria-invalid': props.warning === undefined ? undefined : 'true',
+            onChange: (event) => {
+              setDraft(event.target.value)
+              props.onEdit()
+            },
+            onBlur: commit,
+            onKeyDown: (event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            },
           }),
-          React.createElement('span', { className: 'dsh-th-dot', style: { backgroundColor: row.color } }),
-          React.createElement('span', { className: 'dsh-th-hex' }, row.color.toUpperCase()),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-th-disc',
+              'data-dsh-th': 'style-menu',
+              'aria-expanded': open === true ? 'true' : 'false',
+              'aria-label': props.styleMenu,
+              title: props.styleMenuHint,
+              onClick: () => setOpen(open !== true),
+            },
+            React.createElement(ChevronIcon, null),
+          ),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-th-whole',
+              'data-dsh-th': 'whole',
+              'data-on': row.whole === true ? '1' : undefined,
+              'aria-pressed': row.whole === true ? 'true' : 'false',
+              'aria-label': props.wholeLabel,
+              title: props.wholeHint,
+              onClick: () => props.onWhole(row.whole !== true),
+            },
+            props.wholeLabel,
+          ),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-th-mute',
+              'data-dsh-th': 'mute',
+              'data-muted': props.muted === true ? '1' : undefined,
+              'aria-pressed': props.muted === true ? 'true' : 'false',
+              'aria-label': props.muted === true ? props.unmuteLabel : props.muteLabel,
+              title: props.muteHint,
+              onClick: props.onMute,
+            },
+            props.muted === true ? props.unmuteLabel : props.muteLabel,
+          ),
+          React.createElement(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-th-icon',
+              'data-dsh-th': 'remove',
+              'aria-label': props.removeLabel,
+              title: props.removeLabel,
+              onClick: props.onRemove,
+            },
+            React.createElement(TrashIcon, null),
+          ),
         ),
-        React.createElement(
-          'button',
-          {
-            type: 'button',
-            className: 'dsh-th-mute',
-            'data-dsh-th': 'mute',
-            'data-muted': props.muted === true ? '1' : undefined,
-            'aria-pressed': props.muted === true ? 'true' : 'false',
-            'aria-label': props.muted === true ? props.unmuteLabel : props.muteLabel,
-            title: props.muteHint,
-            onClick: props.onMute,
-          },
-          props.muted === true ? props.unmuteLabel : props.muteLabel,
-        ),
-        React.createElement(
-          'button',
-          {
-            type: 'button',
-            className: 'dsh-th-icon',
-            'data-dsh-th': 'remove',
-            'aria-label': props.removeLabel,
-            title: props.removeLabel,
-            onClick: props.onRemove,
-          },
-          React.createElement(TrashIcon, null),
-        ),
+        /* Why the last edit did not take: shown under the row until it is edited again. */
+        props.warning === undefined
+          ? null
+          : React.createElement('p', { className: 'dsh-th-warn', 'data-dsh-th': 'duplicate' }, props.warning),
+        open === true
+          ? React.createElement(
+              'div',
+              { className: 'dsh-th-panel', 'data-dsh-th': 'style-panel' },
+              React.createElement('span', { className: 'dsh-th-panelLabel' }, props.colorLabel),
+              React.createElement(
+                'label',
+                { className: 'dsh-th-color', title: row.color },
+                React.createElement('input', {
+                  className: 'dsh-th-swatch',
+                  type: 'color',
+                  value: row.color,
+                  'aria-label': props.colorLabel,
+                  onChange: (event) => props.onColor(event.target.value),
+                }),
+                React.createElement('span', { className: 'dsh-th-dot', style: { backgroundColor: row.color } }),
+                React.createElement('span', { className: 'dsh-th-hex' }, row.color.toUpperCase()),
+              ),
+              React.createElement('span', { className: 'dsh-th-panelLabel' }, props.fontLabel),
+              React.createElement(
+                'select',
+                {
+                  className: 'dsh-th-select',
+                  'data-dsh-th': 'font',
+                  value: row.font,
+                  'aria-label': props.fontLabel,
+                  onChange: (event) => props.onStyle({ font: event.target.value }),
+                },
+                [
+                  ['default', props.fontDefault],
+                  ['mono', props.fontMono],
+                  ['serif', props.fontSerif],
+                ].map(([value, label]) => React.createElement('option', { key: value, value }, label)),
+              ),
+              styleOf('B', 'bold', row.bold, props.boldLabel),
+              styleOf('I', 'italic', row.italic, props.italicLabel),
+              styleOf('U', 'underline', row.underline, props.underlineLabel),
+            )
+          : null,
       )
     }
 
@@ -1292,6 +1642,22 @@ window.__ModuleLoader__.load({
         const settings = useSettings()
         const labels = dict(settings.lang)
         const setRows = (next) => patch({ rows: next })
+        /* The row whose last edit was refused for duplicating another keyword. */
+        const [rejected, setRejected] = React.useState(null)
+        /*
+         * Committing a keyword's text. A word may exist once: when the typed text is
+         * the same keyword as another row (trimmed, and case-folded while matching
+         * ignores case), the edit is refused — the row keeps its old text and says why.
+         */
+        const commitText = (value, ownId, index) => {
+          if (duplicateOf(settings.rows, value, ownId, settings.caseSensitive) !== null) {
+            setRejected({ id: ownId, text: value.trim() })
+            return false
+          }
+          setRejected(null)
+          setRows(settings.rows.map((item, at) => (at === index ? { ...item, text: value } : item)))
+          return true
+        }
         const contributed = typeof props.renderSlot === 'function' ? props.renderSlot('settings.thinking-highlight.item', {}) : null
         return React.createElement(
           'div',
@@ -1312,7 +1678,7 @@ window.__ModuleLoader__.load({
             { className: 'dsh-th-group' },
             React.createElement(
               SettingRow,
-              { label: labels.language },
+              { label: labels.language, hint: labels.languageHint },
               React.createElement(
                 'div',
                 { className: 'dsh-th-seg', role: 'group', 'aria-label': labels.language },
@@ -1344,18 +1710,20 @@ window.__ModuleLoader__.load({
             ),
             React.createElement(
               SettingRow,
-              { label: labels.enabled },
+              { label: labels.enabled, hint: labels.enabledHint },
               React.createElement(Switch, {
                 checked: settings.enabled,
+                marker: 'switch-enabled',
                 label: labels.enabled,
                 onChange: () => patch({ enabled: settings.enabled !== true }),
               }),
             ),
             React.createElement(
               SettingRow,
-              { label: labels.chipsWhenCollapsed },
+              { label: labels.chipsWhenCollapsed, hint: labels.chipsWhenCollapsedHint },
               React.createElement(Switch, {
                 checked: settings.chipsWhenCollapsed,
+                marker: 'switch-chips',
                 label: labels.chipsWhenCollapsed,
                 onChange: () => patch({ chipsWhenCollapsed: settings.chipsWhenCollapsed !== true }),
               }),
@@ -1365,22 +1733,34 @@ window.__ModuleLoader__.load({
               { label: labels.liftOnExpand, hint: labels.liftOnExpandHint },
               React.createElement(Switch, {
                 checked: settings.liftOnExpand,
+                marker: 'switch-lift',
                 label: labels.liftOnExpand,
                 onChange: () => patch({ liftOnExpand: settings.liftOnExpand !== true }),
               }),
             ),
             React.createElement(
               SettingRow,
-              { label: labels.caseSensitive },
+              { label: labels.caseSensitive, hint: labels.caseSensitiveHint },
               React.createElement(Switch, {
                 checked: settings.caseSensitive,
+                marker: 'switch-case',
                 label: labels.caseSensitive,
                 onChange: () => patch({ caseSensitive: settings.caseSensitive !== true }),
               }),
             ),
           ),
           contributed,
-          React.createElement('div', { className: 'dsh-th-hr', 'data-dsh-th': 'divider' }),
+          /* The keyword list reads as its own group, headed the way the host heads one. */
+          React.createElement(
+            'div',
+            { className: 'dsh-th-setrow dsh-th-grouphead' },
+            React.createElement(
+              'div',
+              { className: 'dsh-th-setlabel' },
+              React.createElement('span', { className: 'dsh-th-settitle' }, labels.keywords),
+              React.createElement('span', { className: 'dsh-th-setdesc' }, labels.keywordsHint),
+            ),
+          ),
           React.createElement(
             'div',
             { className: 'dsh-th-kws', 'data-dsh-th': 'keywords' },
@@ -1392,13 +1772,28 @@ window.__ModuleLoader__.load({
                     row,
                     muted: settings.muted.includes(row.id),
                     placeholder: labels.keywordPlaceholder,
-                    colorLabel: labels.keywords,
+                    colorLabel: labels.colorLabel,
                     removeLabel: labels.remove,
                     muteLabel: labels.mute,
                     unmuteLabel: labels.unmute,
                     muteHint: labels.muteHint,
-                    onText: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, text: value } : item))),
+                    wholeLabel: labels.whole,
+                    wholeHint: labels.wholeHint,
+                    styleMenu: labels.styleMenu,
+                    styleMenuHint: labels.styleMenuHint,
+                    fontLabel: labels.font,
+                    fontDefault: labels.fontDefault,
+                    fontMono: labels.fontMono,
+                    fontSerif: labels.fontSerif,
+                    boldLabel: labels.bold,
+                    italicLabel: labels.italic,
+                    underlineLabel: labels.underline,
+                    onCommitText: (value) => commitText(value, row.id, index),
+                    onEdit: () => setRejected(null),
+                    warning: rejected !== null && rejected.id === row.id ? labels.duplicate + ' 「' + rejected.text + '」' : undefined,
                     onColor: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, color: hex(value) } : item))),
+                    onWhole: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, whole: value === true } : item))),
+                    onStyle: (changes) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, ...changes } : item))),
                     onMute: () => patch({ muted: toggleIn(settings.muted, row.id) }),
                     onRemove: () =>
                       patch({
@@ -1418,7 +1813,7 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dsh-th-add',
                 'data-dsh-th': 'add',
-                onClick: () => setRows(settings.rows.concat({ id: nextRowId(), text: '', color: DEFAULT_COLOR })),
+                onClick: () => setRows(settings.rows.concat(freshRow(''))),
               },
               React.createElement(PlusIcon, null),
               labels.add,

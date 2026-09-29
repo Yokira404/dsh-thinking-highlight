@@ -34,6 +34,13 @@ check('no percentage cap in the chip rules', /\.dsh-th-(badge-set|chips)\{[^}]*m
 check('the chip reads as a button, not a span', /\.dsh-th-badge\{[^}]*font:inherit/.test(css) && /\.dsh-th-badge\{[^}]*cursor:pointer/.test(css), 'present')
 check('the muted chip drops every keyword colour', /\.dsh-th-badge\[data-muted="1"\][^{]*\{[^}]*border-color:var\(--dsw-alias-border-l3\)/.test(css), 'present')
 check('the muted chip is dashed, so off never looks like on', /\.dsh-th-badge\[data-muted="1"\][^{]*\{[^}]*border-style:dashed/.test(css), 'present')
+check('the style disclosure and its panel exist', css.includes('.dsh-th-disc{') && css.includes('.dsh-th-panel{'), 'present')
+check('the whole-word button sits where the colour used to', css.includes('.dsh-th-whole{') && css.includes('.dsh-th-kwrow{'), 'present')
+check('the panel carries font, style toggles and a darker surface', css.includes('.dsh-th-select{') && css.includes('.dsh-th-style{') && /\.dsh-th-panel\{[^}]*background:var\(--dsw-alias-bg-module-platform/.test(css), 'present')
+check('a refused duplicate shows its warning', css.includes('.dsh-th-warn{') && /\.dsh-th-input\[aria-invalid="true"\]\{[^}]*border-color/.test(css), 'present')
+check('settings rows mirror the host row', /\.dsh-th-setrow\{[^}]*border-bottom:\.5px solid var\(--dsw-alias-border-l2\)/.test(css) && /\.dsh-th-setdesc\{[^}]*color:var\(--dsw-alias-label-secondary\)/.test(css), 'present')
+check('settings controls use the host filled look', /\.dsh-th-seg\{[^}]*background:var\(--dsw-alias-interactive-bg-hover\)/.test(css) && /\.dsh-th-whole\{[^}]*background:var\(--dsw-alias-interactive-bg-hover\)/.test(css) && /\.dsh-th-add\{[^}]*background:var\(--dsw-alias-interactive-bg-hover\)/.test(css), 'present')
+check('the page title is bold and a step larger', /\.dsh-th-heading\{[^}]*font-size:18px/.test(css) && /\.dsh-th-heading\{[^}]*font-weight:600/.test(css), 'present')
 const stray = css.split('\n').find((line) => line.includes('`'))
 check('the literal closes at a line of its own', end > 0 && stray === undefined, stray === undefined ? 'ok' : 'stray line: ' + stray.trim())
 

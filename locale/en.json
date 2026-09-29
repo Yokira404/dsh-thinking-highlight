@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Thinking Highlighter",
-    "description": "Red-highlights chain-of-thought keywords, shows a keyword-count chip in the thinking row with an eye toggle beside it, and opens its own Settings section for language, switches, case matching, and keyword colors."
+    "description": "Keyword counts and highlighting for thinking rows: a per-word count chip on the title line (click one to switch that word off), colouring by word once expanded, per-word colour, typeface, bold / italic / underline and whole-word matching, and folded rows counted over the whole chain of thought. The plugin has its own Settings section."
   }
 }

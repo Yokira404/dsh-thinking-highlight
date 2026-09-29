@@ -1,178 +1,130 @@
-# 标红插件 · Thinking Highlighter
+# Thinking Highlighter · 标红插件
 
-思维链（思考行）的提示词统计与标红插件，设置里有自己的分区。
+A DSH plugin that counts and highlights keywords inside chain-of-thought rows ("thinking" rows), with its own
+section in Settings.
 
-- **计数徽章**：每条思考行的标题行上、紧挨着「思考 ·」显示 `提示词 × n`，n 是该条思维链里这个词出现的次数；
-  多个关键词各占一个徽章，**颜色画在徽章的外框上**——徽章里的字和底色都保持宿主原来的颜色，所以任何关键词色都不会
-  和它自己的背景撞色。徽章右边是眼睛图标。
-- **点徽章 = 这个词的开关**：点一下某个徽章，**这个词**（所有行）立刻停止标红，徽章本身不退场——它变成虚线、
-  变灰、外框不再有颜色，位置和计数都还在，就是那个开关；再点一下恢复。这个状态会存进设置，刷新后仍然有效；
-  设置页每个关键词行右侧的「抑制／已抑制」是同一个开关（有些关键词可能一眼看不到它的徽章）。
-- **思维链标红**：展开思考行后，正文里命中的关键词以该关键词的颜色加底色标出（正文文字不变色）。
-- **折叠时统计的是整段推理**：折叠行身上只有「思考 ·」加一行预览，但徽章的数字来自**被折叠掉的整段思维链**，
-  所以折叠时和展开后的数字一致——不会只数那一行预览。
-- **眼睛开关**：徽章右侧一只眼睛图标，点一下变成「眼睛加斜线」，这一行的标红立刻隐藏/恢复，按钮图标同步切换。
-- **折叠时的标注**：折叠状态默认也显示徽章与眼睛（位置和展开时一样，预览文字跟在它们后面）；不想要可以在设置里关掉。
-- **插件页开关**：侧边栏「插件」的**已安装**分组里有一张「标红插件」卡片，右侧开关即整体启停
-  （关掉会卸载 Host 半边，颜色、徽章与标红一起消失；再打开即恢复）。开关只改 profile 的
-  `dsh.profile.bundles`，不动依赖。
-- **设置分区**：`Ctrl + ,` 打开设置后，左侧导航里有独立的一行「标红插件」（插件语言切到 English 时显示
-  Thinking Highlighter），页面不再挤在「通用设置」的列表里：
+[中文说明 →](README.zh.md)
 
-  | 行 | 作用 |
-  |---|---|
-  | 语言 | 中文 / English，插件界面语言；左侧那一行的名字也跟着它变 |
-  | 插件开关 | 一键隐藏全部颜色、徽章与标红 |
-  | 折叠时显示标注 | 关掉后，思考折叠时不再显示徽章与眼睛（展开时照常显示） |
-  | 展开时撑开思考框（默认关） | DSH 把一轮的过程收进一个最高 400px、可滚动的框里（`.WW4l1q_body`，`max-height: min(400px, 50vh)` + 上下 24px 渐隐）。展开的思考行比框高时，后面那截只能靠框内滚动才看得到；打开这一项后，插件在**有行展开期间**把最近的那层「有 max-height 的可滚动祖先」的高度上限临时去掉，收起来时原样放回。默认关，因为它改的是宿主自己的布局 |
-  | 不区分大小写 | 关键词匹配是否忽略大小写 |
-  | ——— 分隔线 ——— | |
-  | 关键词 / 颜色 / 删除 | 每行一个关键词，可改颜色（色块即取色器） |
-  | 抑制 / 已抑制 | 与对话里点徽章是同一个开关：抑制后这个词不再标红，徽章保留 |
-  | 添加提示词 | 新增一个关键词行；右侧「恢复默认」回默认值（同时清掉所有抑制） |
+![Count chips and keyword highlighting in a thinking row](docs/reasoning.png)
 
-  这一页还声明并渲染了子 slot `settings.thinking-highlight.item`：以后的新功能（或另一个包）把自己的行
-  注册进去，就直接长在这一页里，不用改这一页的布局。
+- **Count chips** — every thinking row shows `keyword × n` right after its title, one chip per keyword, so you
+  can see at a glance which word keeps coming back and how often.
+- **Click a chip to switch that keyword off** — the word stops being highlighted everywhere, the chip stays
+  in place in a muted state and the same click turns it back on. The choice is remembered.
+- **Highlighting** — expand a row and every occurrence of a keyword is tinted with that keyword's own colour.
+  The text itself is never recoloured, so nothing becomes unreadable.
+- **Per-keyword colour and text style** — colour, typeface (default / monospace / serif), bold, italic,
+  underline. What you set is what both the highlight and the chip show.
+- **Whole-word matching** — per keyword: `is` either matches everywhere or only where it stands alone
+  (never inside `this` or `ThisIs`).
+- **Folded rows count the whole chain of thought** — the numbers do not change when you expand a row.
+- **Per-row eye** — one row's highlighting can be hidden without touching the others.
+- **One row per keyword** — typing a word that already exists is refused, with a note saying why.
 
-设置保存在浏览器本地（`localStorage`），改动即时生效。
+## Install
 
-## 结构
+Requires the DSH desktop app (built and tested against `@deepseek-ai/dsh-desktop` 0.2.0-rc.2).
 
-| 文件 | 作用 |
+```bash
+git clone https://github.com/Yokira404/dsh-thinking-highlight.git
+cd dsh-thinking-highlight
+node evidence/install.mjs desktop        # or another profile name
+```
+
+The installer records a `link:` dependency pointing at the checkout, adds the package to
+`dsh.profile.bundles`, and creates a junction under `<profile>/node_modules`. Then **restart the app**: the card
+appears in **Plugins → 已安装**, where the switch enables or disables it.
+
+You can also add the folder through the Plugins page's own "add plugin" action, which does the same thing
+through pnpm.
+
+> The dependency entry is not optional: the Plugins page only lists a package the profile records as a
+> *dependency* (or as a shipped-optional bundle). A package that is merely selected in `dsh.profile.bundles`
+> loads fine but gets no card — and therefore no switch.
+
+## Settings
+
+`Ctrl + ,` → **标红插件 / Thinking Highlighter** in the left navigation.
+
+![The plugin's own settings section](docs/settings-en.png)
+
+| Row | What it does |
 |---|---|
-| `package.json` | bundle 清单：`dsh.bundle.patch` + `dsh.client`（`platform: web`） |
-| `cordis.patch.yml` | 在 profile 里插入 `thinking-highlight` 行 |
-| `index.js` | Host 半边；只负责让包可加载并发布 `dsh.client` |
-| `client.js` | 浏览器半边：设置分区（`settings.section`）+ 思考行装饰（计数徽章、标红、眼睛开关） |
-| `locale/zh.json`、`locale/en.json` | 插件卡片标题与描述，必须是 `{"meta": {"title", "description"}}`，跟随 DSH 界面语言 |
-| `icon.svg` | 插件图标 |
+| Language | 中文 / English for the plugin's own UI; the nav row follows it too |
+| Plugin | Hides every colour, chip and highlight at once |
+| Chips when collapsed | Whether a folded row shows its chips and eye |
+| Expand lifts the box (off by default) | DSH folds a turn's process into a scroll box capped at 400px; with this on, an expanded row temporarily drops that cap so a long chain of thought can be read without scrolling inside the box |
+| Case sensitive | Off (default): `is` also matches `IS` |
+| Keywords | One row per word: text field, `▸ style`, `完整词 / whole word`, suppress, delete |
+| ▸ style panel | Colour, font, **B**old, **I**talic, **U**nderline for that keyword |
 
-## 加新功能时放哪里
+Settings live in the browser's `localStorage` and apply immediately.
 
-设置页就是一个普通的分区，加东西有两档：
+## How it works
 
-- **长在这一页里**：直接改 `client.js` 的 `buildSettingsSection()`（页面组件）和 `TEXT`（文案），
-  新行放进 `.dsh-th-group`，或用既有的 `.dsh-th-hr` 分组。左侧那一行不用动。
-- **从别的包加进来**：往 `settings.thinking-highlight.item` 注册即可——这一页已经声明并渲染了它：
+The thinking row is a sealed built-in component with no slot to render into, so the plugin decorates the
+rendered DOM instead — by splitting text nodes, never by replacing them:
 
-  ```js
-  ctx.slots.inject('settings.thinking-highlight.item', () =>
-    ctx.slots.register({ name: 'settings.thinking-highlight.item', id: 'my-feature', order: 10 }, MyRow))
-  ```
+- Highlighting empties the text node React owns and inserts the plugin's own spans before it. React keeps
+  updating the same node, so streaming neither breaks nor duplicates text.
+- Work is coalesced on a 90 ms timer, and a row whose text and settings are unchanged is skipped entirely.
+- The chip set is inserted *inside the header's own text line*, after the title and its separator: while a row
+  is folded that header is a fixed-height box, so anything appended to the block itself would land below it.
+- Nothing in the chip set may shrink (the collapsed preview beside it is `flex: auto`), which is why the chip
+  group has a fixed width cap and clips only itself.
+- Counting is text-accurate: the chip set is excluded, the highlight spans are not — otherwise the numbers
+  would climb by one on every pass, or collapse to zero after the first highlight.
+- A folded row has no body to read: the host only mounts the chain of thought while expanded, and the whole
+  text lives in the host component's `text` prop. The plugin reaches it through the fiber React attaches to
+  every element it created (`__reactFiber$…`); anything unexpected reads as "unavailable" and the DOM text is
+  used instead.
 
-  注册只在声明它的这一页存在期间有效（本页随 `settings.section` 一起装卸）。
+## Compatibility and caveats
 
-`settings.section` 的注册选项（`client.js` 里的 `openSection()`）：`id` 是这一行的键，`order` 决定它在导航里的位置
-（通用 0、内置插件 15，本插件 30），`label` 是 thunk，返回什么就显示什么。
+- The plugin decorates `[data-variant="think"]` rows as DSH renders them today. A DSH release that changes
+  those internals can require an update here; when a lookup fails the plugin degrades to doing less, never to
+  breaking the transcript.
+- Per-keyword suppression applies to **all rows** (the chip is the same keyword everywhere). The per-row eye is
+  the per-row control.
+- *Expand lifts the box* is the one setting that reaches into host layout, which is why it ships off.
 
-## 实现要点
-
-思考行 `[data-variant="think"]` 是内置组件，没有对外插槽，所以装饰走渲染后的 DOM：
-
-- 标红只做两件事——把 React 自己那个文本节点的值清空，然后在它前面插入新建的高亮 `span` 和剩余文字节点。
-  新节点全是插件自己的，React 之后写回的仍是原来那个节点，所以流式输出时不会崩、不会丢字，也不会出现重复文字。
-- 每次变更按 90ms 合并一次；行文本与正文都没变就整行跳过，流式期间开销可控。
-- 重新标红前先按记录把上一次插入的节点删掉、把文本还原，所以反复展开/折叠、编辑关键词都不会累积。
-
-徽章与眼睛的落点是**标题那一行本身**（`[data-open] > [data-disclosure-row] > 内容行`），插在标题和它的 `·` 之后、
-折叠预览之前：
-
-- 折叠时整行是个固定 24px、`contain: size layout` 的盒子，所以放到 `[data-open]` 那一层（旧做法）会掉到行下面去；
-  放进内容行才和「思考 ·」同一行。
-- 徽章组**完全不参与收缩**：旁边的折叠预览是 `flex: auto`，可收缩的徽章组会被长预览挤扁、把自己的徽章裁掉；
-  徽章组改为定宽上限（420px）＋只裁自己，眼睛永远完整。
-- 徽章组里有我们自己的节点，所以正文标红显式跳过 `data-dsh-th` 的整棵子树：徽章里的关键词曾经被再标一次底色，
-  于是「字的颜色和背景一样」。标红只碰正文自己的文本节点。
-- 计数用的「这一行的文本」**只排除徽章组本身**（`data-dsh-th="badges"`），高亮 `span` 的文字要算进来。两者
-  都带 `data-dsh-th`，如果按属性一律排除，第一次标红之后每个命中都躲进了高亮里，计数会在下一次扫描时掉到 0，
-  徽章连同眼睛一起消失——而且文本没变、缓存判定「没变化」，这个状态会一直粘住。反过来，如果连徽章也一起数，
-  就是自己数自己：`is × 22` 会被当成又出现一次 `is`，数字每 90ms 的合并周期往上爬一格。
-- 折叠行没有正文可数：宿主只在 `expanded` 时才挂载思维链，折叠时那一行预览就是 DOM 里的全部文字。整段
-  推理仍然活在宿主自己组件的 `text` 属性上（`ReasoningRow`），而 React 在每个它创建的节点上挂了 fiber
-  （`__reactFiber$…`），于是从行元素往上走到最近一个带字符串 `text` 的组件就拿到了整段文字。任何异常情况
-  （没有 fiber、属性改名、换了 React）都读作「拿不到」，退回只用 DOM 文字——也就是加这个之前的旧行为。
-  `rows()` 里的 `folded` 就是「这一行的数字是不是来自被折叠的那段」。
-- 宿主重绘可能把插件插进正文的节点整批丢掉而文本一字不变（压缩上下文会整段重渲染对话），所以每次扫描先看
-  「上次插进去的那个节点还在不在文档里」；不在就把这一行的缓存作废、重新标红。`rows()` 里的 `marked` 就是它。
-- 抑制走的是**关键词 id 列表**（`muted`），不是「少标一次」：被抑制的词直接从包装用的关键词表里去掉，正文一个
-  节点都不会被切开；关键词整行被删时它的 id 也一起清掉，`loadState()` 再兜一次底。
-- 颜色、过滤条件、抑制都进 `patternKey`，而且 `patternKey` 一变就把正文的文本缓存作废——否则「颜色改了但正文
-  一字未变」会让旧的高亮一直留在那里（改动只走到徽章，走不到标红）。
-
-## 运行期自检
-
-浏览器控制台里可用 `window.__DSH_TH__`：
-
-```js
-__DSH_TH__.version            // '1.0'
-__DSH_TH__.settings()         // 当前设置
-__DSH_TH__.rows()             // 每条思考行：{ highlighted, count, hasBadges, marked }
-__DSH_TH__.refresh()          // 重新读取 localStorage 里的设置，并强制重算所有行
-__DSH_TH__.clear()            // 立刻移除徽章、还原文本节点、放回被撑开的框
-__DSH_TH__.pass()             // 立刻按观察器那条路径跑一次（不清缓存），passes() 是累计次数
-```
-
-## 安装与部署
-
-工作区里这份是**唯一源**；装进 profile 由一行命令完成：
+## Development
 
 ```bash
-node evidence/install.mjs desktop      # 或传入其它 profile 名
+node evidence/selftest.mjs         # 27 checks: splitting, undoing, counting, case, colour, whole-word edges
+node evidence/client-harness.mjs   # 91 checks: the browser half really runs, against a stubbed host
+node evidence/css-check.mjs        # 19 checks: the stylesheet literal (braces, chip/row/panel rules)
+node evidence/locale-check.mjs     #  8 checks: package meta, both locale files and the version tag agree
+node evidence/e2e-bundle.mjs <page-url-with-token> @Yokira404/dsh-thinking-highlight <cookie>
 ```
 
-它在 profile 的 `package.json` 里写一条 **`link:` 依赖**（指向本目录），把
-`@local/dsh-thinking-highlight` 加进 `dsh.profile.bundles`，并在
-`$DSH_HOME/profiles/<profile>/node_modules/@local/dsh-thinking-highlight` 建一个指向工作区的
-**junction**。于是源码只有一份：Host 半边和浏览器半边都直接读工作区，改完源码不用再复制，
-**浏览器半边刷新页面**即可，Host 半边改完需要重启应用。
+The self-tests extract the shipped functions out of `client.js` by brace matching and run them against a DOM
+stub — never a copy — and the harness executes the factory, `apply`, the settings page and a full row
+decoration with React stubbed out. They exist because the failure modes here are quiet ones: a template
+literal that loses its tail, counts that count themselves, a cache that keeps a highlight from coming back.
 
-> **为什么依赖那一条不能省**：插件页（侧边栏「插件」）只列 profile 记成**依赖**的组合包
-> （`plugin_manager.listBundles` 的 `installed`）或随安装提供的官方可选包。只写进
-> `dsh.profile.bundles`、不写 `dependencies` 时，包虽然照常加载（`running`），插件页却按
-> `installed || optional || error` 过滤掉它——不出现卡片，也就**没有开关**。（`_tools/page-view.mjs`
-> 复现了这两段判断，可以直接打印某个 profile 会渲染出的卡片。）
+`e2e-bundle.mjs` checks a running scratch profile end to end: the host row activates, the boot graph carries
+the browser half, and the served bundle is the current source.
 
-> **关于 `link:`／junction**：早前记录的「junction 形态在 Desktop 里加载不稳」已证伪——那次
-> 行不激活的真正原因是 Host 半边当时只导出常量、没有 `apply`，Cordis 无从 apply，于是 `failed`。
-> 现在用 `link:` + junction 起一次 web profile：`thinking-highlight` 行为 `active`，浏览器半边在
-> 启动清单里、下发的 bundle 就是当前源码。
+| File | Role |
+|---|---|
+| `package.json` | bundle manifest: `dsh.bundle.patch` + `dsh.client` (`platform: web`) |
+| `cordis.patch.yml` | inserts the `thinking-highlight` row into a profile |
+| `index.js` | host half; makes the package loadable and publishes `dsh.client` |
+| `client.js` | browser half: the settings section and the reasoning-row decoration |
+| `locale/*.json` | card title and description, in the `{"meta": {...}}` shape DSH reads |
+| `icon.svg` | plugin icon |
+| `docs/` | the screenshots used above |
 
-> 用 `plugin_manager` 的「添加插件」填本目录绝对路径是同一个形态（`pnpm add <dir>` 也写
-> `link:`），区别只是它还会跑一次 pnpm、刷新 lockfile；`evidence/install.mjs` 不碰 lockfile，
-> 下一次管理器操作会把锁文件补齐。
+At runtime, `window.__DSH_TH__` exposes `settings()`, `rows()` (`{ highlighted, count, hasBadges, marked,
+folded }`), `refresh()`, `clear()`, `pass()` and `passes()` for poking at the decoration from the console.
 
-## 本地校验（不装插件也能跑）
+## Uninstall
 
-```bash
-node evidence/selftest.mjs         # 20 项：切分/还原/计数/大小写/颜色
-node evidence/client-harness.mjs   # 65 项：客户端半边在桩环境里真的跑起来
-node evidence/css-check.mjs        # 12 项：样式表本身（括号配平、徽章规则、抑制态、没有百分比上限）
-node evidence/e2e-bundle.mjs <带 token 的页面地址> @local/dsh-thinking-highlight <cookie>
-```
+Use the card's **卸载 / Remove** in the Plugins page, or delete the `link:` dependency, the
+`node_modules/@Yokira404/dsh-thinking-highlight` junction and the `dsh.profile.bundles` entry by hand. Unloading
+removes every chip, puts the split text nodes back and drops the plugin's stylesheet.
 
-- `selftest.mjs` 用大括号配对从 `client.js` 里**抽出真正在跑的函数**（不是副本），配一个遵守
-  `splitText` 真实语义的 DOM 桩：命中切分后文本一字不多一字不少、还原后节点结构与文本回到原样、
-  同一段重复包装不累积、跨多个文本节点每条记录都能还原、正则元字符按字面、长词优先、颜色只认真实十六进制。
-- `client-harness.mjs` 把 `react` / `react-dom/client` 替换成桩，然后**真的执行** factory、`apply`、
-  设置页组件（连点所有按钮、驱动所有输入框）以及一次完整的思考行装饰。思考行按真实结构搭：
-  `[data-open] > [data-disclosure-row] > 内容行`，所以徽章插在哪一层、有没有落在标题行上、在不在折叠预览
-  之前，都是断言出来的；另外还断言徽章外框拿到了关键词色、徽章里的字没有变色、徽章自己的子树从不被标红，
-  以及关掉「折叠时显示标注」后徽章消失、展开后又回来。桩只声明真实存在的 slot，所以「注册到未声明的 slot」
-  「忘了写 `name`」「还在往通用设置里塞行」也会当场失败。
-  它同时钉住几个只有真跑起来才会暴露的坑：徽章出现后连续几轮扫描**计数不许变**（自己数自己会让数字往上爬）、
-  正文被整批重绘后**标红必须自己回来**（缓存判定「文本没变」会把它永久粘死）、宿主往我们清空的文本节点里
-  写进新文字时**不许被还原覆盖**（流式输出丢字）、以及展开/收起/关掉开关三态下**那个框的高度上限要原样放回**。
-  徽章这个开关也是断言出来的：点一下**只有那个词**停止标红（另一个词的命中还在）、徽章原地变成 `data-muted`
-  且不带任何关键词色、状态写进存储、设置页那一行同步为 `aria-pressed="true"`，再点一下整条链路复原。
-  页面组件是**真的被跑一遍**的（`pageNodes(true)` 会把 `Switch`/`KeywordRow` 这些无 hook 的叶子组件按 React 的
-  做法执行），所以每行的「抑制」按钮、开关这些控件也在断言范围内。
-- `css-check.mjs` 静态检查那段样式表字面量：括号配平、徽章外框/字色/不收缩规则在位、没有会把自己挤扁的
-  百分比上限——模板字符串里一个多余的反引号就会静默吃掉它后面的所有规则。
-- `e2e-bundle.mjs` 对着一个跑起来的临时 profile 校验：插件行真的激活、启动清单带上浏览器半边、
-  下发的 bundle 就是当前源码。
+## License
 
-## 卸载
-
-插件页卡片上的**卸载**，或手动删掉 profile `package.json` 里的 `link:` 依赖与
-`node_modules/@local/dsh-thinking-highlight` junction，并把 `@local/dsh-thinking-highlight` 从
-`dsh.profile.bundles` 移除。插件卸载时会自动移除徽章、还原被切分的文本节点并撤销样式。
+[MIT](LICENSE) © 2026 Yokira404

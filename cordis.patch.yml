@@ -1,4 +1,4 @@
-# Bundle layer for @local/dsh-thinking-highlight.
+# Bundle layer for @Yokira404/dsh-thinking-highlight.
 #
 # Listing this package in the profile's dsh.profile.bundles makes DSH read this
 # patch and insert the row below, which loads the Host half. The Host half also
@@ -6,5 +6,5 @@
 # ./client.js to the browser.
 - insert:
     - id: thinking-highlight
-      name: '@local/dsh-thinking-highlight'
+      name: '@Yokira404/dsh-thinking-highlight'
       config: {}
