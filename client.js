@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.1.0'
+    const VERSION = '1.2.0'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -251,6 +251,7 @@ window.__ModuleLoader__.load({
         keywordsHint: '一行一个词；右侧的图标里是这个词的颜色与样式',
         version: '版本',
         add: '添加提示词',
+        keywordsFull: '已达上限（最多 200 个词）',
         remove: '删除',
         keywordPlaceholder: '输入提示词…',
         reset: '恢复默认',
@@ -297,6 +298,7 @@ window.__ModuleLoader__.load({
         keywordsHint: 'One word per row; the icon on the right holds its colour and text style',
         version: 'version',
         add: 'Add keyword',
+        keywordsFull: 'Limit reached (200 keywords max)',
         remove: 'Remove',
         keywordPlaceholder: 'Type a keyword…',
         reset: 'Restore defaults',
@@ -455,6 +457,9 @@ window.__ModuleLoader__.load({
 .dsh-th-foot{display:flex;align-items:center;gap:8px;padding-top:16px}
 .dsh-th-add{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
 .dsh-th-add:hover{background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
+/* At the keyword cap the add button stays visible but stops taking clicks. */
+.dsh-th-add[disabled]{opacity:.5;cursor:not-allowed}
+.dsh-th-add[disabled]:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-th-add:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .dsh-th-reset{margin-left:auto;height:36px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
 .dsh-th-reset:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
@@ -669,19 +674,40 @@ window.__ModuleLoader__.load({
       return out
     }
 
-    /** The disclosure header row: the row that owns the expandable `[data-open]` marker. */
+    /**
+     * The disclosure block: the element that owns the header text line. It carries
+     * `data-open` only while the row is expanded, so a collapsed row is found
+     * through its `[data-disclosure-row]` line instead.
+     *
+     * The first element child is only the last resort. While the model is still
+     * streaming, the shipped row renders a visually-hidden "running" status span
+     * (`clip: rect(0 0 0 0); width: 1px; height: 1px; overflow: hidden`) *before*
+     * the disclosure block, so taking the first child there put the whole chip set
+     * and the eye inside that 1px box: the reader saw no badges at all for exactly
+     * as long as they were being counted.
+     */
     function headerRowOf(root) {
       for (const candidate of root.querySelectorAll('div[data-open]')) return candidate
+      const line = root.querySelector('[data-disclosure-row]')
+      const owner = line === null ? null : line.parentElement
+      if (owner !== null && owner !== undefined && owner !== root && root.contains(owner) === true) return owner
       const first = root.firstElementChild
       if (first === null) return null
       return first.querySelector('div[data-open]') ?? first
     }
 
     /**
-     * The expanded chain-of-thought container. Rows vary: the wrapper may be
-     * absent, present, or the body may be laid out differently, so the class is
-     * stamped on whichever element is found and every later pass finds it by
-     * class. A collapsed row has no body and correctly returns null.
+     * The expanded chain-of-thought container. Rows vary, so the class is stamped
+     * on whichever element is found and every later pass finds it by class. A
+     * collapsed row has no body and correctly returns null.
+     *
+     * The shipped layout keeps the expanded content *inside* the disclosure block,
+     * directly after the header line (`DisclosureRow` renders
+     * `[div[data-disclosure-row], open && children]`), so that is where the body is
+     * looked for first. The old walk assumed the body was a sibling of the header
+     * and, failing that, stamped whatever the first element child happened to be —
+     * which is how the marks ended up on the hidden status span, and why a settled
+     * row that had never been seen streaming could not be highlighted at all.
      */
     function bodyOf(root) {
       /*
@@ -691,18 +717,37 @@ window.__ModuleLoader__.load({
        */
       const own = root.querySelector('.' + BODY_CLASS)
       if (own !== null && own !== undefined && own.isConnected !== false) return own
-      const wrapped = root.querySelector('[data-turn-process-inline] > div')
-      if (wrapped !== null && wrapped !== undefined) {
-        wrapped.classList.add(BODY_CLASS)
-        return wrapped
-      }
       const header = headerRowOf(root)
-      const first = root.firstElementChild
-      if (first === null || first === undefined) return null
-      const candidate = first === header ? first.nextElementSibling : first
-      if (candidate === null || candidate === undefined || candidate.nodeType !== 1) return null
-      candidate.classList.add(BODY_CLASS)
-      return candidate
+      if (header === null || header === undefined) return null
+      const line = header.querySelector('[data-disclosure-row]')
+      const inside = line === null || line === undefined ? header.children?.[1] : line.nextElementSibling
+      if (
+        inside !== null &&
+        inside !== undefined &&
+        inside.nodeType === 1 &&
+        inside.hasAttribute(MARK) !== true &&
+        inside.contains(header) !== true
+      ) {
+        inside.classList.add(BODY_CLASS)
+        return inside
+      }
+      /*
+       * Another layout may keep the body beside the disclosure block instead of
+       * inside it. Only a following sibling qualifies: anything before the header is
+       * the status label or a leading glyph, never the chain of thought.
+       */
+      const after = header.nextElementSibling
+      if (
+        after !== null &&
+        after !== undefined &&
+        after.nodeType === 1 &&
+        root.contains(after) === true &&
+        after.hasAttribute(MARK) !== true
+      ) {
+        after.classList.add(BODY_CLASS)
+        return after
+      }
+      return null
     }
 
     /* ── the folded box DSH clips an expanded body with ─────────────────────── */
@@ -847,21 +892,24 @@ window.__ModuleLoader__.load({
       entry.mount = undefined
       entry.mountReact = undefined
       entry.mountKey = undefined
-      entry.mountParent = undefined
     }
 
     /**
      * Render the chip set into the plugin's own container. React owns every node
      * inside it, so the host tree never re-renders or removes anything of ours.
      */
-    function paintBadges(entry, children, labels) {
+    function paintBadges(entry, children, labels, lang) {
       const container = entry.mount
       if (container === undefined || container.isConnected !== true) return
       try {
         if (entry.mountReact === undefined) {
           entry.mountReact = ReactDOMClient.createRoot(container, { onRecoverableError: () => {} })
         }
-        container.lang = labels === undefined ? 'zh-CN' : labels.lang
+        /*
+         * The dictionary has no `lang` key of its own — asking it for one answers the
+         * key itself, which is how the container ended up carrying `lang="lang"`.
+         */
+        container.lang = lang === undefined || labels === undefined ? 'zh-CN' : lang === 'en' ? 'en' : 'zh-CN'
         entry.mountReact.render(React.createElement(React.Fragment, null, children))
       } catch (error) {
         console.error('[' + NS + '] badge render failed', error)
@@ -962,7 +1010,6 @@ window.__ModuleLoader__.load({
       if (options.showChips !== true) {
         /* Collapsed, and the reader asked to keep collapsed rows unmarked. */
         if (entry.mount !== undefined) unmountBadges(entry)
-        entry.counts = counts
         entry.mountKey = undefined
         return
       }
@@ -979,13 +1026,11 @@ window.__ModuleLoader__.load({
        */
       if (entry.mount.parentNode !== seat.parent || entry.mount.nextElementSibling !== seat.before) {
         seat.parent.insertBefore(entry.mount, seat.before)
-        entry.mountParent = seat.parent
       }
-      entry.counts = counts
       /*
-       * The key covers everything a chip shows: its count, its off state, and the text
-       * style its name previews — otherwise a style change would leave the chip
-       * looking the way it did until something else happened to change.
+       * The key covers everything a chip shows: its count, its off state, the text
+       * style its name previews — and the language of its label and tooltip, which
+       * changes with nothing else on the row.
        */
       const key =
         counts
@@ -1002,10 +1047,12 @@ window.__ModuleLoader__.load({
           )
           .join('|') +
         '#' +
-        String(entry.highlighted === true)
+        String(entry.highlighted === true) +
+        '@' +
+        String(options.lang ?? '')
       if (entry.mountKey === key && entry.mount.childElementCount === children.length) return
       entry.mountKey = key
-      paintBadges(entry, children, options.labels)
+      paintBadges(entry, children, options.labels, options.lang)
     }
 
     /**
@@ -1180,6 +1227,17 @@ window.__ModuleLoader__.load({
         entry.bodyKey = undefined
         entry.text = undefined
       }
+      /*
+       * A chip set the host detached — it re-rendered the header away, or moved the
+       * seat — is out of the document, so no query can find it again. Without this
+       * the row keeps its stale caches, the early return below skips it forever and
+       * the badges stay invisible while their React root stays alive; dropping the
+       * caches sends the row through the full path, which re-seats the same container.
+       */
+      if (entry.mount !== undefined && entry.mount.isConnected !== true) {
+        entry.text = undefined
+        entry.bodyKey = undefined
+      }
       const header = headerRowOf(root)
       const expanded = header !== null && isExpanded(root, header)
       /*
@@ -1195,9 +1253,25 @@ window.__ModuleLoader__.load({
       /* The DOM text stays in the key: the preview appearing or leaving is a change. */
       const text = counted + '\u0000' + domText
       const patternChanged = entry.patternKey !== options.patternKey
-      if (entry.text === text && patternChanged !== true && entry.enabled === options.enabled && entry.expanded === expanded) return
+      /*
+       * A language flip changes nothing about the text or the pattern, but every
+       * chip's label, tooltip and `lang` attribute has to follow it — and the early
+       * return below would otherwise keep the rows the reader is looking at in the
+       * old language until something else about them changed.
+       */
+      const labelsChanged = entry.labelsKey !== options.labelsKey
+      if (
+        entry.text === text &&
+        patternChanged !== true &&
+        labelsChanged !== true &&
+        entry.enabled === options.enabled &&
+        entry.expanded === expanded
+      ) {
+        return
+      }
       entry.text = text
       entry.patternKey = options.patternKey
+      entry.labelsKey = options.labelsKey
       entry.enabled = options.enabled
       entry.expanded = expanded
       entry.folded = folded !== null
@@ -1324,6 +1398,20 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Drop the per-row text and body caches. The next pass then rebuilds every row
+     * from whatever the settings say now, which is what a settings change made
+     * outside this document (another window, or `refresh`) needs.
+     */
+    function forgetRows() {
+      for (const root of liveRoots()) {
+        const entry = rows.get(root)
+        if (entry === undefined) continue
+        entry.text = undefined
+        entry.bodyKey = undefined
+      }
+    }
+
     /** Observe the conversation and keep every reasoning row decorated. */
     function startDecorating(handle) {
       let scheduled = 0
@@ -1384,6 +1472,9 @@ window.__ModuleLoader__.load({
               liftOnExpand: settings.liftOnExpand,
               onToggleKeyword: toggleKeyword,
               labels,
+              /* The language is a rendering concern of its own: see `labelsChanged`. */
+              lang: settings.lang,
+              labelsKey: settings.lang,
               patternKey,
             })
           } catch (error) {
@@ -1430,6 +1521,12 @@ window.__ModuleLoader__.load({
           unmountBadges(stateOf(root))
           const body = bodyOf(root)
           if (body !== null) unwrapBody(body)
+          /*
+           * The body stamp is ours too. Leaving it behind would keep a class of ours
+           * on a host element (and on an element the host may re-render for a
+           * different row, where the next install would mistake it for the body).
+           */
+          for (const stamped of root.querySelectorAll('.' + BODY_CLASS)) stamped.classList.remove(BODY_CLASS)
           root.removeAttribute('data-dsh-hl')
         }
       }
@@ -1813,11 +1910,24 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dsh-th-add',
                 'data-dsh-th': 'add',
-                onClick: () => setRows(settings.rows.concat(freshRow(''))),
+                /*
+                 * The matcher and the loader both stop at MAX_KEYWORDS, so a row added
+                 * past it would silently never match and would be dropped on the next
+                 * reload. Refusing it here is the only honest option.
+                 */
+                disabled: settings.rows.length >= MAX_KEYWORDS,
+                title: settings.rows.length >= MAX_KEYWORDS ? labels.keywordsFull : undefined,
+                onClick: () => {
+                  if (settings.rows.length >= MAX_KEYWORDS) return
+                  setRows(settings.rows.concat(freshRow('')))
+                },
               },
               React.createElement(PlusIcon, null),
               labels.add,
             ),
+            settings.rows.length >= MAX_KEYWORDS
+              ? React.createElement('span', { className: 'dsh-th-empty', 'data-dsh-th': 'keywords-full' }, labels.keywordsFull)
+              : null,
             React.createElement(
               'button',
               {
@@ -1860,6 +1970,13 @@ window.__ModuleLoader__.load({
     const SECTION_ITEM_SLOT = 'settings.thinking-highlight.item'
     /** After the official sections (general 0, plugins 15), so this sits last. */
     const SECTION_ORDER = 30
+    /**
+     * How many times a refused `settings.section` injection is retried, and the
+     * first delay. The shell declares the slot while it boots, so the first retry
+     * usually lands; three attempts is enough not to look like a hang either way.
+     */
+    const SECTION_INJECT_ATTEMPTS = 3
+    const SECTION_INJECT_DELAY = 400
 
     /* ─────────────────────────────── runtime ───────────────────────────── */
 
@@ -1883,6 +2000,7 @@ window.__ModuleLoader__.load({
          */
         let sectionLive = false
         let disposeSection = null
+        const sectionRetries = new Set()
         const openSection = () => {
           disposeSection = ctx.slots.register(
             {
@@ -1897,25 +2015,48 @@ window.__ModuleLoader__.load({
           )
           return disposeSection
         }
-        try {
-          ctx.slots.inject('settings.section', () => {
-            try {
-              sectionLive = true
-              openSection()
-              reportRegistration('registered', 'settings.section#' + SECTION_ID)
-              return () => {
-                sectionLive = false
-                if (disposeSection !== null) disposeSection()
-                disposeSection = null
+        /*
+         * A throw here is usually an ordering accident — the shell declares
+         * `settings.section` at runtime, and so does the next plugin in the list — so
+         * a failed injection is retried a few times instead of costing the plugin its
+         * settings page for the whole session. Each attempt is recorded, so
+         * `localStorage['…registration']` still says what happened.
+         */
+        const injectSection = (attempt) => {
+          try {
+            ctx.slots.inject('settings.section', () => {
+              try {
+                sectionLive = true
+                openSection()
+                reportRegistration(attempt === 0 ? 'registered' : 'registered-retry', 'settings.section#' + SECTION_ID)
+                return () => {
+                  sectionLive = false
+                  if (disposeSection !== null) disposeSection()
+                  disposeSection = null
+                }
+              } catch (error) {
+                reportRegistration('register-threw', error && error.message ? error.message : error)
+                throw error
               }
-            } catch (error) {
-              reportRegistration('register-threw', error && error.message ? error.message : error)
-              throw error
-            }
-          })
-        } catch (error) {
-          reportRegistration('inject-threw', error && error.message ? error.message : error)
+            })
+          } catch (error) {
+            reportRegistration('inject-threw', (error && error.message ? error.message : error) + ' (attempt ' + (attempt + 1) + ')')
+            if (attempt + 1 >= SECTION_INJECT_ATTEMPTS) return
+            const timer = window.setTimeout(() => {
+              sectionRetries.delete(timer)
+              injectSection(attempt + 1)
+            }, SECTION_INJECT_DELAY * (attempt + 1))
+            sectionRetries.add(timer)
+          }
         }
+        injectSection(0)
+        ctx.effect(
+          () => () => {
+            for (const timer of sectionRetries) window.clearTimeout(timer)
+            sectionRetries.clear()
+          },
+          NS + ':section-retry',
+        )
 
         /*
          * The shell resolves a section label when the ledger or the locale
@@ -1946,15 +2087,29 @@ window.__ModuleLoader__.load({
 
         ctx.effect(() => startDecorating(handle), NS + ':decorate')
 
+        /*
+         * A second window (or the same page written from elsewhere) changes the stored
+         * state without this document hearing about it any other way: the browser only
+         * announces the change to the *other* documents, through `storage`. Re-read the
+         * store and drop every row cache, so the transcript follows along instead of
+         * waiting for a reload.
+         */
         ctx.effect(() => {
-          const forget = () => {
-            for (const root of liveRoots()) {
-              const entry = rows.get(root)
-              if (entry === undefined) continue
-              entry.text = undefined
-              entry.bodyKey = undefined
-            }
+          /* A platform without event listeners simply keeps the old single-document
+             behaviour instead of failing to activate. */
+          if (typeof window.addEventListener !== 'function') return () => {}
+          const onStorage = (event) => {
+            if (event.key !== null && event.key !== undefined && event.key !== STORAGE_KEY) return
+            reloadFromStore()
+            forgetRows()
           }
+          window.addEventListener('storage', onStorage)
+          return () => {
+            if (typeof window.removeEventListener === 'function') window.removeEventListener('storage', onStorage)
+          }
+        }, NS + ':storage')
+
+        ctx.effect(() => {
           const runtime = {
             version: VERSION,
             settings: () => snapshot,
@@ -1974,7 +2129,7 @@ window.__ModuleLoader__.load({
             /* Re-read what the settings page (or another tab) wrote, then redo every row. */
             refresh: () => {
               reloadFromStore()
-              forget()
+              forgetRows()
             },
             /* The pass the observer runs, on demand and with the caches intact. */
             pass: () => {
@@ -1989,7 +2144,7 @@ window.__ModuleLoader__.load({
                 if (body !== null) unwrapBody(body)
               }
               for (const box of [...lifts.keys()]) restoreLift(box)
-              forget()
+              forgetRows()
             },
             /* Testing seam: the same functions the reconciler runs, so a DOM
                self-test exercises shipped code instead of a copy of it. */

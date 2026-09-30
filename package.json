@@ -1,7 +1,8 @@
 {
   "name": "@Yokira404/dsh-thinking-highlight",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
+  "license": "MIT",
   "description": "Chain-of-thought keyword counting and highlighting: per-word count chips with a click-to-suppress switch, per-word colour and text style, whole-word matching, and a dedicated settings section",
   "type": "module",
   "icon": "./icon.svg",

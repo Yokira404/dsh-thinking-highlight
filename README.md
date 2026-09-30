@@ -66,10 +66,18 @@ The thinking row is a sealed built-in component with no slot to render into, so 
 rendered DOM instead — by splitting text nodes, never by replacing them:
 
 - Highlighting empties the text node React owns and inserts the plugin's own spans before it. React keeps
-  updating the same node, so streaming neither breaks nor duplicates text.
+  updating the same node, so streaming never breaks or loses text. The one visible seam: between React writing
+  a new chunk into that node and the plugin's next pass (at most one 90 ms coalescing window) the previous
+  split and the new text are both in the DOM; the pass drops the stale copy and re-marks the new text.
 - Work is coalesced on a 90 ms timer, and a row whose text and settings are unchanged is skipped entirely.
 - The chip set is inserted *inside the header's own text line*, after the title and its separator: while a row
   is folded that header is a fixed-height box, so anything appended to the block itself would land below it.
+  The header block is found by its `[data-disclosure-row]` line, not by being the row's first element: while
+  the model is still streaming the host renders a visually-hidden "running" status span before it, and a chip
+  set parked in that 1 px box is a chip set nobody can see.
+- The expanded chain of thought is looked for *inside* the disclosure block, right after the header line,
+  because that is where `DisclosureRow` renders it (`[div[data-disclosure-row], open && children]`). A settled
+  row that was never seen streaming has to be found this way too, or expanding it can never highlight anything.
 - Nothing in the chip set may shrink (the collapsed preview beside it is `flex: auto`), which is why the chip
   group has a fixed width cap and clips only itself.
 - Counting is text-accurate: the chip set is excluded, the highlight spans are not — otherwise the numbers
@@ -83,18 +91,22 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
 
 - The plugin decorates `[data-variant="think"]` rows as DSH renders them today. A DSH release that changes
   those internals can require an update here; when a lookup fails the plugin degrades to doing less, never to
-  breaking the transcript.
+  breaking the transcript. `evidence/host-shape.mjs` models the installed markup and also asserts the markers
+  it depends on are still present in the app's own bundle, so a DSH rename fails a test instead of going quiet.
 - Per-keyword suppression applies to **all rows** (the chip is the same keyword everywhere). The per-row eye is
   the per-row control.
 - *Expand lifts the box* is the one setting that reaches into host layout, which is why it ships off.
+- Settings live in this browser's `localStorage`. A change made in another window arrives through the browser's
+  `storage` event; the plugin re-reads the store and rebuilds every row.
 
 ## Development
 
 ```bash
-node evidence/selftest.mjs         # 27 checks: splitting, undoing, counting, case, colour, whole-word edges
-node evidence/client-harness.mjs   # 91 checks: the browser half really runs, against a stubbed host
-node evidence/css-check.mjs        # 19 checks: the stylesheet literal (braces, chip/row/panel rules)
-node evidence/locale-check.mjs     #  8 checks: package meta, both locale files and the version tag agree
+node evidence/selftest.mjs         #  27 checks: splitting, undoing, counting, case, colour, whole-word edges
+node evidence/client-harness.mjs   # 102 checks: the browser half really runs, against a stubbed host
+node evidence/css-check.mjs        #  19 checks: the stylesheet literal (braces, chip/row/panel rules)
+node evidence/locale-check.mjs     #   8 checks: package meta, both locale files and the version tag agree
+node evidence/host-shape.mjs       #  25 checks: the installed row markup, plus its markers in the app bundle
 node evidence/e2e-bundle.mjs <page-url-with-token> @Yokira404/dsh-thinking-highlight <cookie>
 ```
 
@@ -103,8 +115,12 @@ stub — never a copy — and the harness executes the factory, `apply`, the set
 decoration with React stubbed out. They exist because the failure modes here are quiet ones: a template
 literal that loses its tail, counts that count themselves, a cache that keeps a highlight from coming back.
 
+`host-shape.mjs` is the one suite that models the DOM the host actually renders — the hidden status span, the
+body nested inside the disclosure block — because a fixture built from the plugin's own assumptions cannot
+catch a wrong assumption. It skips its bundle check with a printed SKIP when the app is not installed here.
+
 `e2e-bundle.mjs` checks a running scratch profile end to end: the host row activates, the boot graph carries
-the browser half, and the served bundle is the current source.
+the browser half, and the served bundle is byte-identical (sha256) to `client.js`.
 
 | File | Role |
 |---|---|
@@ -123,7 +139,8 @@ folded }`), `refresh()`, `clear()`, `pass()` and `passes()` for poking at the de
 
 Use the card's **卸载 / Remove** in the Plugins page, or delete the `link:` dependency, the
 `node_modules/@Yokira404/dsh-thinking-highlight` junction and the `dsh.profile.bundles` entry by hand. Unloading
-removes every chip, puts the split text nodes back and drops the plugin's stylesheet.
+removes every chip, puts the split text nodes back, drops the plugin's stylesheet and takes its `dsh-th-body`
+marker class off the host's elements.
 
 ## License
 

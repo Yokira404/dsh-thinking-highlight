@@ -58,10 +58,15 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 思考行是内置组件、没有对外插槽，所以装饰走**渲染后的 DOM**——只切分文本节点，从不替换 React 的节点：
 
 - 标红时把 React 自己那个文本节点的值清空，在它前面插入插件新建的 span。React 之后写回的仍是同一个节点，
-  因此流式输出既不崩、也不丢字、不会出现重复文字。
+  因此流式输出不崩、不丢字。唯一看得见的接缝：React 把新一段写进那个节点之后、插件下一趟处理之前（最多一个
+  90 ms 的合并窗口），上一版的切分副本和新全文会同时留在 DOM 里，那一趟会把旧副本丢掉并重新标红新文本。
 - 变更按 90 ms 合并；行文本与设置都没变就整行跳过。
 - 徽章插在**标题那一行本身**（`[data-open] > [data-disclosure-row] > 内容行`），标题与它的分隔点之后、
-  折叠预览之前：折叠时整个头部是固定高度的盒子，挂在块级层上会掉到行下面去。
+  折叠预览之前：折叠时整个头部是固定高度的盒子，挂在块级层上会掉到行下面去。头部块靠它的
+  `[data-disclosure-row]` 那一行来找，而不是靠「行的第一个子元素」：模型还在流式输出时，宿主会在头部块
+  **之前**渲染一个视觉隐藏的「正在思考」状态 span，徽章落进那个 1px 盒子就等于没人看得见。
+- 展开的思维链在**披露块内部**、紧跟标题行之后找（`DisclosureRow` 就是这么渲染的：`[div[data-disclosure-row],
+  open && children]`）。已经完结、从未在流式中被看到过的行也必须这样找得到，否则展开它永远不会上色。
 - 徽章组**完全不参与收缩**（旁边的折叠预览是 `flex: auto`），所以它有定宽上限、只裁自己。
 - 计数用的文本**只排除徽章组**，高亮 span 要算进来：两者都带标记，一律排除会让数字在第一次标红后掉到 0，
   连徽章一起消失；反过来连徽章一起数，就是自己数自己，数字每轮往上爬一格。
@@ -72,17 +77,20 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 ## 兼容性与已知取舍
 
 - 插件按当前 DSH 渲染出的 `[data-variant="think"]` 行来装饰。DSH 若改动这些内部结构，这里可能需要跟着改；
-  查找失败时插件只会「少做一点」，不会把对话弄坏。
+  查找失败时插件只会「少做一点」，不会把对话弄坏。`evidence/host-shape.mjs` 按安装版的真实结构建模，并顺带
+  断言它依赖的那几个标记仍然存在于应用自己的 bundle 里——DSH 改名会变成一条失败的测试，而不是安静地不工作。
 - 抑制是按**关键词**生效的（同一个词在所有行一起停），逐行控制是那只眼睛。
 - 四个设置里只有「展开时撑开思考框」会碰宿主布局，所以它默认关闭。
+- 设置存在本机浏览器里。另一个窗口改了设置，会通过浏览器的 `storage` 事件传过来，插件重新读一遍并重建每一行。
 
 ## 开发
 
 ```bash
-node evidence/selftest.mjs         # 27 项：切分/还原/计数/大小写/颜色/完整词边界
-node evidence/client-harness.mjs   # 91 项：浏览器半边在桩宿主里真的跑起来
-node evidence/css-check.mjs        # 19 项：样式表字面量（括号、徽章/行/面板规则）
-node evidence/locale-check.mjs     #  8 项：包 meta、两个语言文件与版本号互相对得上
+node evidence/selftest.mjs         #  27 项：切分/还原/计数/大小写/颜色/完整词边界
+node evidence/client-harness.mjs   # 102 项：浏览器半边在桩宿主里真的跑起来
+node evidence/css-check.mjs        #  19 项：样式表字面量（括号、徽章/行/面板规则）
+node evidence/locale-check.mjs     #   8 项：包 meta、两个语言文件与版本号互相对得上
+node evidence/host-shape.mjs       #  25 项：安装版的真实行结构，以及它在应用 bundle 里的标记
 node evidence/e2e-bundle.mjs <带 token 的页面地址> @Yokira404/dsh-thinking-highlight <cookie>
 ```
 
@@ -90,8 +98,12 @@ node evidence/e2e-bundle.mjs <带 token 的页面地址> @Yokira404/dsh-thinking
 factory、`apply`、设置页组件和一次完整的思考行装饰。它们针对的都是安静出错的坑：模板字符串丢了尾巴、
 计数把自己数进去、缓存让标红再也回不来。
 
+`host-shape.mjs` 是唯一按**宿主真正渲染的 DOM** 建模的套件（含流式期间那个视觉隐藏的状态 span、嵌在披露块
+内部的正文）：用插件自己的假设搭出来的桩，抓不到假设本身错在哪。找不到应用安装时，它的 bundle 检查会打印
+SKIP 而不是失败。
+
 `e2e-bundle.mjs` 对着一个跑起来的临时 profile 做端到端校验：Host 行真的激活、启动清单带上浏览器半边、
-下发的 bundle 就是当前源码。
+下发的 bundle 与 `client.js` **逐字节一致（sha256）**。
 
 | 文件 | 作用 |
 |---|---|
@@ -109,7 +121,8 @@ folded }`）、`refresh()`、`clear()`、`pass()`、`passes()`。
 ## 卸载
 
 插件页卡片上的**卸载**，或手动删掉 `link:` 依赖、`node_modules/@Yokira404/dsh-thinking-highlight` junction
-与 `dsh.profile.bundles` 里的条目。卸载会移除全部徽章、还原被切分的文本节点并撤掉插件样式。
+与 `dsh.profile.bundles` 里的条目。卸载会移除全部徽章、还原被切分的文本节点、撤掉插件样式，并把
+`dsh-th-body` 这个标记 class 从宿主元素上摘掉。
 
 ## 许可
 

@@ -172,6 +172,7 @@ let pending = null
 const timeouts = []
 const observers = []
 const storage = new Map()
+const windowListeners = []
 
 globalThis.window = {
   __ModuleLoader__: {
@@ -201,6 +202,14 @@ globalThis.window = {
     maxHeight: node?.computedStyle?.maxHeight ?? 'none',
   }),
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+  /* Enough of the listener API for the plugin's cross-document settings sync. */
+  addEventListener(name, listener) {
+    windowListeners.push({ name, listener })
+  },
+  removeEventListener(name, listener) {
+    const at = windowListeners.findIndex((entry) => entry.name === name && entry.listener === listener)
+    if (at >= 0) windowListeners.splice(at, 1)
+  },
   innerWidth: 1440,
   innerHeight: 900,
 }
@@ -1078,6 +1087,54 @@ check('turning the switch on makes matching case-sensitive', runtime0().rows()[1
 check('the switch is stored as caseSensitive', storedState().caseSensitive === true, JSON.stringify(storedState().caseSensitive))
 clickSettings('switch-case')
 check('turning it back off restores case-insensitive matching', runtime0().rows()[1]?.count === 2, 'count ' + String(runtime0().rows()[1]?.count))
+
+// 18. A language flip reaches the chips that are already on screen.
+storeSettings({ rows: [{ id: 'l1', text: 'is', color: '#dc2626' }], muted: [], lang: 'zh', caseSensitive: false })
+row.removeAttribute('data-expanded')
+header.removeAttribute('data-open')
+runtime0().pass()
+const chipTitle = () => chipsFor(row)[0]?.props?.title ?? ''
+const badgeLang = () => row.querySelector('[data-dsh-th="badges"]')?.lang ?? ''
+check('the chip explains itself in Chinese first', chipTitle().includes('点击关闭'), JSON.stringify(chipTitle()))
+check('the chip container is tagged zh-CN', badgeLang() === 'zh-CN', JSON.stringify(badgeLang()))
+clickSettings('lang-en')
+runtime0().pass()
+check('flipping the language re-labels the chips on screen', chipTitle().includes('Click to stop'), JSON.stringify(chipTitle()))
+check('and re-tags the container', badgeLang() === 'en', JSON.stringify(badgeLang()))
+clickSettings('lang-zh')
+runtime0().pass()
+check('flipping back restores the Chinese label', chipTitle().includes('点击关闭'), JSON.stringify(chipTitle()))
+
+// 19. Another window writes the same key: only a `storage` event announces it.
+{
+  const current = storedState()
+  globalThis.window.localStorage.setItem(
+    'dsh-thinking-highlight.state.v1',
+    JSON.stringify({ ...current, rows: [{ id: 's1', text: '但', color: '#2563eb' }], muted: [] }),
+  )
+  const before = runtime0().settings().rows.map((entry) => entry.text).join('|')
+  for (const entry of [...windowListeners]) if (entry.name === 'storage') entry.listener({ key: 'dsh-thinking-highlight.state.v1' })
+  runTimers()
+  check('the plugin listens for storage events', windowListeners.some((entry) => entry.name === 'storage'), JSON.stringify(windowListeners.map((entry) => entry.name)))
+  check('another window\'s settings arrive without a reload', before !== runtime0().settings().rows.map((entry) => entry.text).join('|'), before + ' -> ' + runtime0().settings().rows.map((entry) => entry.text).join('|'))
+  check(
+    'and the transcript follows the new keyword',
+    chipsFor(row).some((chip) => (chip.children ?? []).some((child) => (child?.children ?? []).includes('但'))),
+    JSON.stringify(chipsFor(row).map((chip) => chip.props?.title)),
+  )
+}
+
+// 20. The keyword cap is enforced where the reader can see it.
+{
+  const many = Array.from({ length: 200 }, (_, index) => ({ id: 'cap' + index, text: 'w' + index, color: '#dc2626' }))
+  storeSettings({ rows: many, muted: [] })
+  const addAtCap = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'add')
+  check('at 200 keywords the add button is disabled', addAtCap?.props?.disabled === true, JSON.stringify(addAtCap?.props?.disabled))
+  check('and the cap is explained', pageNodes(true).some((node) => node.props?.['data-dsh-th'] === 'keywords-full'), 'hint node ' + String(pageNodes(true).filter((node) => node.props?.['data-dsh-th'] === 'keywords-full').length))
+  storeSettings({ rows: many.slice(0, 199) })
+  const addBelowCap = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'add')
+  check('one below the cap it works again', addBelowCap?.props?.disabled !== true, JSON.stringify(addBelowCap?.props?.disabled))
+}
 
 let failed = 0
 for (const result of results) {

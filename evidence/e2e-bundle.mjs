@@ -1,13 +1,35 @@
 /**
  * End-to-end check against a running scratch Web profile: the plugin's Host row
  * activates, the boot graph carries its browser half, and the served bundle is
- * the current source.
+ * byte-identical to the current source.
  *
- *   node e2e-bundle.mjs <page-url-with-token> <package-id>
+ *   node e2e-bundle.mjs <page-url-with-token> <package-id> [cookie]
  */
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 const page = process.argv[2]
 const id = process.argv[3]
 const cookieArg = process.argv[4]
+
+if (page === undefined || id === undefined) {
+  console.error('usage: node e2e-bundle.mjs <page-url-with-token> <package-id> [cookie]')
+  console.error("  the page URL must carry the desktop app's loopback token; _tools/live-page-check.mjs shows how to find one")
+  process.exit(2)
+}
+try {
+  new URL(page)
+} catch (error) {
+  console.error('FAIL: not a usable page URL: ' + page)
+  process.exit(2)
+}
+
+/* The comparison below is the point of this suite: "the served bundle is the
+   current source" cannot be shown by looking for a few identifiers in it. */
+const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'client.js'))
+const sourceHash = createHash('sha256').update(source).digest('hex')
 
 /** The page sets a session cookie on the token exchange and also accepts a `cookie` argument. */
 const headers = cookieArg === undefined ? {} : { cookie: cookieArg }
@@ -57,6 +79,11 @@ const expected = [
   'useSyncExternalStore',
 ]
 const missing = expected.filter((needle) => !body.includes(needle))
+const servedHash = createHash('sha256').update(body).digest('hex')
+const sameBytes = servedHash === sourceHash
 console.log('bundle: ' + response.status + ', ' + body.length + ' bytes')
-console.log(missing.length === 0 ? 'OK: served bundle is the current source' : 'FAIL: bundle is missing ' + JSON.stringify(missing))
-process.exit(missing.length === 0 && response.status === 200 ? 0 : 4)
+console.log('  source sha256: ' + sourceHash)
+console.log('  served sha256: ' + servedHash + (sameBytes ? '  (identical)' : '  (DIFFERENT — the page serves a stale build)'))
+if (missing.length > 0) console.error('FAIL: bundle is missing ' + JSON.stringify(missing))
+if (sameBytes === false) console.error('FAIL: served bundle is not the current source; rebuild or reload before trusting this check')
+process.exit(missing.length === 0 && sameBytes === true && response.status === 200 ? 0 : 4)
