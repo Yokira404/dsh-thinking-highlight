@@ -1,4 +1,28 @@
+# Dependencies — the plugin is linked into a profile, never installed from source here
 node_modules/
+
+# Logs
 *.log
+
+# OS droppings
 .DS_Store
 Thumbs.db
+
+# Editor state (a vim swap file has already turned up under .git/ once)
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Backups: install.mjs keeps the previous profile manifest as package.json.bak-<ts>
+*.bak
+*.bak-*
+*.orig
+*.rej
+
+# Authoring-workspace scratch that must never travel with the package
+_lab/
+_tools/
+_verify/
+_inspect/
+.pnpm-store/

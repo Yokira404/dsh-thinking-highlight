@@ -18,7 +18,9 @@ section in Settings.
 - **Whole-word matching** — per keyword: `is` either matches everywhere or only where it stands alone
   (never inside `this` or `ThisIs`).
 - **Folded rows count the whole chain of thought** — the numbers do not change when you expand a row.
-- **Per-row eye** — one row's highlighting can be hidden without touching the others.
+- **Per-row eye** — one row's highlighting can be hidden without touching the others. The marks stay in the
+  text while a row is switched off and the stylesheet hides them (tint *and* the keyword's own type styling),
+  so switching the eye back on is instant and never leaves another keyword unhighlighted.
 - **One row per keyword** — typing a word that already exists is refused, with a note saying why.
 
 ## Install
@@ -82,6 +84,9 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   group has a fixed width cap and clips only itself.
 - Counting is text-accurate: the chip set is excluded, the highlight spans are not — otherwise the numbers
   would climb by one on every pass, or collapse to zero after the first highlight.
+- The per-row eye is a presentation switch, not a filter on the work: a row keeps its marks while it is
+  switched off (`[data-dsh-hl="off"]` neutralises them) so that muting a keyword, streaming or a host
+  re-render during that time cannot leave the row with nothing to show when the eye comes back on.
 - A folded row has no body to read: the host only mounts the chain of thought while expanded, and the whole
   text lives in the host component's `text` prop. The plugin reaches it through the fiber React attaches to
   every element it created (`__reactFiber$…`); anything unexpected reads as "unavailable" and the DOM text is

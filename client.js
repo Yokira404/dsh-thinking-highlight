@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.2.0'
+    const VERSION = '1.2.1'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -383,7 +383,13 @@ window.__ModuleLoader__.load({
 .dsh-th-eye:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-th-eye:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .dsh-th-body .dsh-th-hit{border-radius:3px}
-[data-dsh-hl="off"] .dsh-th-body .dsh-th-hit{background-color:transparent !important}
+/*
+ * One row switched off with its eye. The marks stay in the DOM — the row has to keep
+ * them so switching the eye back on is instant and lossless — so "off" is expressed
+ * by neutralising every part of the mark: the tint and the keyword's own type styling
+ * (bold/italic/underline/typeface), which otherwise stayed visible with the tint gone.
+ */
+[data-dsh-hl="off"] .dsh-th-body .dsh-th-hit{background-color:transparent !important;font-weight:inherit !important;font-style:inherit !important;text-decoration:inherit !important;font-family:inherit !important}
 /*
  * The settings page follows the host's own settings rows (the .PgWN5G_row rule in
  * @deepseek-ai/dsh-client-ui-settings-general, mirrored here): label and description
@@ -410,7 +416,12 @@ window.__ModuleLoader__.load({
 .dsh-th-switch:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 .dsh-th-knob{display:block;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-switch-thumb,var(--dsw-alias-label-primary-foreground));box-shadow:0 1px 2px rgb(0 0 0 / 18%);transition:transform 120ms ease}
 .dsh-th-switch[aria-checked="true"] .dsh-th-knob{transform:translateX(18px)}
-.dsh-th-grouphead{padding-top:4px}
+/* The keyword group's heading reuses the settings-row layout but keeps no hairline:
+   the first keyword row draws its own, so the heading would otherwise box the list in.
+   Its padding is balanced around the text instead of the row's even 16/16 — the plain
+   row padding left the heading hugging the hairline above it with a wide gap under it,
+   which reads as text sitting too high. */
+.dsh-th-grouphead{padding:14px 0 4px;border-bottom:0}
 .dsh-th-kws{display:flex;flex-direction:column}
 .dsh-th-kw{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
 .dsh-th-kwrow{display:flex;align-items:center;gap:8px}
@@ -928,6 +939,20 @@ window.__ModuleLoader__.load({
       const eye = (next) => {
         entry.highlighted = next
         setHighlight(root, next === true && options.enabled === true)
+        /*
+         * Revealing is instant when the marks are there, which is what the rebuild
+         * above guarantees. A row whose marks are gone anyway (a host re-render that
+         * landed while the eye was off, or a plugin switch) has nothing to reveal, so
+         * its caches go and the next pass rebuilds it. The pass is requested
+         * explicitly: the attribute write above is not a mutation the observer watches.
+         */
+        if (next === true) {
+          if (entry.sample === undefined || entry.sample.isConnected !== true) {
+            entry.text = undefined
+            entry.bodyKey = undefined
+          }
+          if (typeof options.requestPass === 'function') options.requestPass()
+        }
         decorate(root, entry, counts, colors, options)
       }
       const children = []
@@ -1354,7 +1379,15 @@ window.__ModuleLoader__.load({
       entry.bodyKey = unmarkedText(body)
       entry.sample = undefined
       setHighlight(root, entry.highlighted === true && options.enabled === true)
-      if (options.enabled !== true || entry.highlighted !== true) return
+      /*
+       * The per-row eye is a presentation switch, not a filter on the work: the marks
+       * are rebuilt whatever it says and the stylesheet hides them while the row is
+       * switched off (`[data-dsh-hl="off"]`). Skipping the rebuild here is what made
+       * the eye lossy — muting a chip (or any other change to the row) while the eye
+       * was off dropped the body's marks, and switching the eye back on only repainted
+       * the chips, so even untouched keywords stayed unhighlighted.
+       */
+      if (options.enabled !== true) return
       /*
        * Muted keywords are left out of the wrap entirely, so a keyword the reader
        * switched off is not merely invisible: the text itself stops being split.
@@ -1471,6 +1504,8 @@ window.__ModuleLoader__.load({
               chipsWhenCollapsed: settings.chipsWhenCollapsed,
               liftOnExpand: settings.liftOnExpand,
               onToggleKeyword: toggleKeyword,
+              /* A control inside a row (the eye) can ask for a pass by itself. */
+              requestPass: schedule,
               labels,
               /* The language is a rendering concern of its own: see `labelsChanged`. */
               lang: settings.lang,

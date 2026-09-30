@@ -1136,6 +1136,67 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
   check('one below the cap it works again', addBelowCap?.props?.disabled !== true, JSON.stringify(addBelowCap?.props?.disabled))
 }
 
+// 21. The per-row eye is a presentation switch: it must never cost a keyword its marks.
+/*
+ * Reported from the app: with two keywords and the eye switched off, muting one
+ * keyword (clicking its chip) and then switching the eye back on showed no
+ * highlighting at all — not even for the keyword that was never muted. Muting
+ * changes the pattern, the pass dropped the body's marks, and the eye being off
+ * made it skip rebuilding them; switching the eye on only repainted the chips.
+ */
+{
+  try {
+    storeSettings({
+      rows: [
+        { id: 'e1', text: '提示词', color: '#dc2626' },
+        { id: 'e2', text: '但', color: '#2563eb' },
+      ],
+      muted: [],
+      caseSensitive: false,
+      chipsWhenCollapsed: false,
+    })
+    row.setAttribute('data-expanded', '')
+    header.setAttribute('data-open', '')
+    runtime0().pass()
+    const hitsNow = () => row.querySelectorAll('[data-dsh-th="hit"]').length
+    const eyeNode = () => {
+      const container = row.querySelector('[data-dsh-th="badges"]')
+      const tree = renderCalls.filter((call) => call.container === container).at(-1)?.element
+      return findNode(tree, (node) => node.props?.['data-dsh-th-eye'] === '1')
+    }
+    const clickEye = () => {
+      eyeNode().props.onClick({ preventDefault() {}, stopPropagation() {} })
+      runTimers()
+      runtime0().pass()
+    }
+    const clickChip = (at) => {
+      chipsFor(row)[at].props.onClick({ preventDefault() {}, stopPropagation() {} })
+      runTimers()
+      runtime0().pass()
+    }
+
+    const initialHits = hitsNow()
+    check('both keywords are marked to begin with', initialHits >= 2, 'hits ' + String(initialHits))
+    clickEye()
+    check('the eye switches the row off', row.getAttribute('data-dsh-hl') === 'off', String(row.getAttribute('data-dsh-hl')))
+    check('switching it off keeps the marks, it only hides them', hitsNow() === initialHits, 'hits ' + String(hitsNow()) + ' vs ' + String(initialHits))
+    clickChip(0)
+    const afterMute = hitsNow()
+    check('muting a keyword with the eye off still rebuilds the body', afterMute > 0 && afterMute < initialHits, 'hits ' + String(afterMute) + ' of ' + String(initialHits))
+    clickEye()
+    check(
+      'switching the eye back on shows the keyword that was never muted',
+      row.getAttribute('data-dsh-hl') === 'on' && afterMute > 0 && hitsNow() === afterMute,
+      JSON.stringify({ attr: row.getAttribute('data-dsh-hl'), hits: hitsNow(), expected: afterMute }),
+    )
+    clickChip(0)
+    check('and unmuting brings the muted keyword back as well', hitsNow() === initialHits, 'hits ' + String(hitsNow()) + ' vs ' + String(initialHits))
+    storeSettings({ muted: [] })
+  } catch (error) {
+    check('the eye regression checks run', false, String(error && error.stack ? error.stack : error))
+  }
+}
+
 let failed = 0
 for (const result of results) {
   if (!result.pass) failed += 1
