@@ -196,10 +196,14 @@ globalThis.window = {
   },
   clearTimeout: () => {},
   /* Only the two computed properties the cap lookup reads; a fixture declares its
-     own `computedStyle` to stand in for a folded process-group body. */
+     own `computedStyle` to stand in for a folded process-group body. The host's own
+     `--dsh-content-font-delta` is published on `body` as
+     `calc(var(--dsh-content-font-size,14px) - 14px)`, so at the default reader body
+     size it resolves to `0px` — which is what a real `getComputedStyle` would answer. */
   getComputedStyle: (node) => ({
     overflowY: node?.computedStyle?.overflowY ?? 'visible',
     maxHeight: node?.computedStyle?.maxHeight ?? 'none',
+    getPropertyValue: (name) => (name === '--dsh-content-font-delta' ? (node?.fontDelta ?? '0px') : ''),
   }),
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
   /* Enough of the listener API for the plugin's cross-document settings sync. */
@@ -646,7 +650,33 @@ const chipNode = findNode(badgeTree, (node) => node.props?.className === 'dsh-th
 const chipNameNode = findNode(badgeTree, (node) => node.props?.className === 'dsh-th-badge-name')
 const chipGroup = findNode(badgeTree, (node) => node.props?.className === 'dsh-th-chips')
 check('chip frame is the keyword colour', typeof chipNode?.props?.style?.borderColor === 'string' && chipNode.props.style.borderColor.length > 0, JSON.stringify(chipNode?.props?.style))
-check('chip text is not recoloured', chipNameNode !== undefined && chipNameNode.props?.style === undefined, JSON.stringify(chipNameNode?.props?.style))
+/*
+ * The chip name previews the keyword's own type styling — its size and ink included —
+ * while the chip's *frame* stays the only place the background colour appears. That
+ * separation is what keeps a name from ever being painted the same colour as the chip
+ * behind it.
+ */
+check(
+  'chip text previews the keyword style, not the keyword background',
+  chipNameNode !== undefined && chipNameNode.props?.style?.color === 'currentColor' && chipNameNode.props?.style?.fontSize === '14px' && chipNameNode.props?.style?.backgroundColor === undefined,
+  JSON.stringify(chipNameNode?.props?.style),
+)
+check(
+  'a default-sized chip carries the neutral scale of 1',
+  chipNode?.props?.style?.['--dsh-th-chip-scale'] === '1',
+  JSON.stringify(chipNode?.props?.style?.['--dsh-th-chip-scale']),
+)
+/*
+ * The chip also carries the tallest it may draw, computed from the host's own
+ * `--dsh-content-font-delta`: a collapsed row's header line is a fixed height with
+ * `contain: size layout`, so this is what stops the largest keyword's chip from being
+ * clipped by the line it sits on.
+ */
+check(
+  'a chip carries the header-line cap it may not outgrow',
+  chipNode?.props?.style?.['--dsh-th-chip-line'] === 'calc(21px + 0px)',
+  JSON.stringify(chipNode?.props?.style?.['--dsh-th-chip-line']),
+)
 check('the eye stays outside the clipping chip group', findNode(badgeTree, (node) => node.props?.['data-dsh-th-eye'] === '1') !== undefined && chipGroup !== undefined, 'chips group ' + String(chipGroup !== undefined))
 
 // 7. Collapsed rows honour the new switch: hide the chip set, then show it again.
@@ -851,7 +881,7 @@ if (runtime0() !== undefined) {
   check('clicking a chip stops that keyword being highlighted', hitsInBody() === 1, 'hits ' + String(hitsInBody()) + ' (但 only)')
   check(
     'the muted chip keeps its place and its count, in an off state',
-    mutedChip !== undefined && mutedChip.props['data-muted'] === '1' && mutedChip.props['aria-pressed'] === 'false' && mutedChip.props.style === undefined,
+    mutedChip !== undefined && mutedChip.props['data-muted'] === '1' && mutedChip.props['aria-pressed'] === 'false' && mutedChip.props.style?.borderColor === undefined,
     JSON.stringify(mutedChip?.props?.['data-muted']) + ' ' + JSON.stringify(mutedChip?.props?.style),
   )
   check('the other keyword keeps its highlight', hitsInBody() === 1 && chipsFor(row).length === 2, 'chips ' + String(chipsFor(row).length))
@@ -1039,6 +1069,129 @@ check(
   JSON.stringify(chipsFor(row)[0]?.children?.[0]?.props?.style),
 )
 check('the style is stored with the keyword', storedState().rows[0].bold === true && storedState().rows[0].font === 'mono', JSON.stringify(storedState().rows[0]))
+
+/*
+ * 15b. The two the style panel gained: the words' own colour, and their own size.
+ * The size scale is the host's own content-size range (10/22), and the chip has to
+ * follow the word it points at — that is the whole reason the chip carries a scale.
+ */
+{
+  const panelNode = (marker) => pageNodes(true).find((node) => node.props?.['data-dsh-th'] === marker)
+  /*
+   * The disclosure is a toggle: clicking it again closes the panel, so the guards below
+   * open it only while it is shut. Opening it fights nothing — the hook cells keep the
+   * open state across the renders these checks do.
+   */
+  const openPanel = () => {
+    if (panelNode('style-panel') === undefined) {
+      pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'style-menu').props.onClick({ preventDefault() {}, stopPropagation() {} })
+    }
+    return pageNodes(true)
+  }
+  const inkDot = () => panelNode('ink-dot')
+  const sizeUp = () => panelNode('size-up')
+  const sizeDown = () => panelNode('size-down')
+  /** What the stepper shows for this keyword, as the reader sees it. */
+  const sizeShown = () => panelNode('size-value')?.children?.[0]
+
+  const openNodes2 = openPanel()
+  check(
+    'the style menu offers a text colour, a follow button and a size stepper',
+    ['ink-dot', 'ink-follow', 'size', 'size-up', 'size-down'].every((marker) => openNodes2.some((node) => node.props?.['data-dsh-th'] === marker)),
+    JSON.stringify(['ink-dot', 'ink-follow', 'size', 'size-up', 'size-down'].map((marker) => openNodes2.filter((node) => node.props?.['data-dsh-th'] === marker).length)),
+  )
+  check(
+    'the text colour starts out following the theme',
+    inkDot()?.props?.style?.backgroundColor === 'currentColor' && panelNode('ink-follow')?.props?.['aria-pressed'] === 'true' && panelNode('ink-follow')?.props?.['data-following'] === '1',
+    JSON.stringify({ dot: inkDot()?.props?.style?.backgroundColor, pressed: panelNode('ink-follow')?.props?.['aria-pressed'] }),
+  )
+  check(
+    'the size starts at the reader body size, with both arrows live',
+    sizeShown() === '14' && sizeUp()?.props?.disabled === false && sizeDown()?.props?.disabled === false,
+    JSON.stringify({ value: sizeShown(), up: sizeUp()?.props?.disabled, down: sizeDown()?.props?.disabled }),
+  )
+
+  /* Ink: the well writes it, and the mark and the chip name both take it. */
+  const inkField = openNodes2.filter((node) => node.type === 'input' && node.props?.type === 'color').at(-1)
+  inkField.props.onChange({ target: { value: '#2563EB' } })
+  runtime0().pass()
+  check('the text colour is stored with the keyword', storedState().rows[0].textColor === '#2563eb', JSON.stringify(storedState().rows[0].textColor))
+  check(
+    'the mark is painted in the keyword text colour',
+    hitSpans().find((span) => span.text === 'is')?.style.color === '#2563eb',
+    JSON.stringify(hitSpans().map((span) => [span.text, span.style.color])),
+  )
+  check(
+    'the chip name previews the same ink',
+    chipsFor(row)[0]?.children?.[0]?.props?.style?.color === '#2563eb',
+    JSON.stringify(chipsFor(row)[0]?.children?.[0]?.props?.style),
+  )
+  check('the swatch stops claiming to follow the theme', panelNode('ink-follow')?.props?.['aria-pressed'] === 'false', String(panelNode('ink-follow')?.props?.['aria-pressed']))
+
+  /* And it can be handed back: the eye-off rule needs a colour that means "the host's". */
+  openPanel().find((node) => node.props?.['data-dsh-th'] === 'ink-follow').props.onClick({ preventDefault() {}, stopPropagation() {} })
+  runtime0().pass()
+  check('the follow button hands the colour back to the theme', storedState().rows[0].textColor === null, JSON.stringify(storedState().rows[0].textColor))
+  check(
+    'a followed colour is inherited, never written as a fixed hex',
+    hitSpans().find((span) => span.text === 'is')?.style.color === 'currentColor',
+    JSON.stringify(hitSpans().map((span) => [span.text, span.style.color])),
+  )
+
+  /* Size: one step at a time, and the chip follows the word. */
+  const sizeChip = () => chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-scale']
+  const before18 = sizeChip()
+  for (let step = 0; step < 4; step += 1) {
+    pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'size-up').props.onClick({ preventDefault() {}, stopPropagation() {} })
+  }
+  runtime0().pass()
+  check('the stepper walks up to 18px and stores it', storedState().rows[0].fontSize === 18, JSON.stringify(storedState().rows[0].fontSize))
+  check(
+    'the mark is drawn at the keyword size',
+    hitSpans().find((span) => span.text === 'is')?.style.fontSize === '18px',
+    JSON.stringify(hitSpans().map((span) => [span.text, span.style.fontSize])),
+  )
+  check('the chip grows with the word it points at', Number(sizeChip()) > Number(before18), before18 + ' -> ' + sizeChip())
+  check('and the panel shows the size it stored', sizeShown() === '18', String(sizeShown()))
+
+  /* The host's own ceiling, and the host's own floor. */
+  for (let step = 0; step < 12; step += 1) {
+    const up = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'size-up')
+    if (up?.props?.disabled === true) break
+    up.props.onClick({ preventDefault() {}, stopPropagation() {} })
+  }
+  runtime0().pass()
+  check('the size stops at the host maximum of 22px', storedState().rows[0].fontSize === 22, JSON.stringify(storedState().rows[0].fontSize))
+  check('at the maximum the up arrow is dead but still there', panelNode('size-up')?.props?.disabled === true && panelNode('size-down')?.props?.disabled === false, JSON.stringify({ up: panelNode('size-up')?.props?.disabled, down: panelNode('size-down')?.props?.disabled }))
+  /*
+   * The cap matters more than the number: a collapsed row's header line is a fixed
+   * height with `contain: size layout`, so a chip that grew without bound would be
+   * clipped rather than read.
+   */
+  check('the chip scale stays inside its bound at the largest size', Number(sizeChip()) <= 1.45, sizeChip())
+  check(
+    'and at the largest size the chip still carries its header-line cap',
+    /^calc\(21px \+ -?\d+(\.\d+)?px\)$/.test(String(chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-line'])),
+    String(chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-line']),
+  )
+  for (let step = 0; step < 20; step += 1) {
+    const down = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === 'size-down')
+    if (down?.props?.disabled === true) break
+    down.props.onClick({ preventDefault() {}, stopPropagation() {} })
+  }
+  runtime0().pass()
+  check('the size stops at the host minimum of 10px', storedState().rows[0].fontSize === 10, JSON.stringify(storedState().rows[0].fontSize))
+  check('at the minimum the down arrow is dead but still there', panelNode('size-down')?.props?.disabled === true && panelNode('size-up')?.props?.disabled === false, JSON.stringify({ up: panelNode('size-up')?.props?.disabled, down: panelNode('size-down')?.props?.disabled }))
+  check('the chip shrinks with the word, inside its own floor', Number(sizeChip()) >= 0.7 && Number(sizeChip()) < 1, sizeChip())
+
+  /* A size below the reader's own leaves the mark smaller, and the row keeps reading. */
+  check(
+    'a smaller keyword is still the same text',
+    hitSpans().map((span) => span.text).join('|') === 'is|and',
+    hitSpans().map((span) => span.text).join('|'),
+  )
+  storeSettings({ rows: [{ id: 'w-is', text: 'is', color: '#dc2626' }, { id: 'w-and', text: 'and', color: '#35c047' }] })
+}
 
 // 16. Two identical keywords can never coexist.
 storeSettings({

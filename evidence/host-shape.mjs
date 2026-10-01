@@ -548,6 +548,32 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
           )
         }
       }
+      /*
+       * The size stepper's range is the host's own content-font-size range, taken from
+       * the theme plugin rather than guessed: 10 and 22 px. The plugin cannot read the
+       * host's schema at runtime, so this is where a DSH release that widens or narrows
+       * that range turns into a failing test instead of a plugin whose arrows disagree
+       * with the reader's own text size.
+       */
+      const theme = collect(header, '', []).find((entry) => entry.path.endsWith('dsh-client-ui-theme/lib/client.js'))
+      if (theme === undefined) {
+        console.log('SKIP  the theme bundle was not found, so the host font-size range was not checked')
+      } else {
+        const buf = Buffer.alloc(theme.size)
+        readSync(fd, buf, 0, buf.length, baseOffset + theme.offset)
+        const text = buf.toString('utf8')
+        check(
+          'the installed theme still defines the content font size as 10–22 px, stepping by 1, default 14',
+          text.includes('Schema.number().step(1).min(10).max(22).default(14)') ||
+            /\.step\(1\)\.min\(10\)\.max\(22\)\.default\(14\)/.test(text),
+          theme.path + ' — the plugin\'s size range is the host\'s; if this changed, change FONT_SIZE_MIN/MAX with it',
+        )
+        check(
+          'and its own stepper still stops at those two ends',
+          text.includes('fontSize >= 22') && text.includes('fontSize <= 10'),
+          theme.path,
+        )
+      }
     } finally {
       closeSync(fd)
     }

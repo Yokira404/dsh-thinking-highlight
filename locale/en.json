@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Thinking Highlighter",
-    "description": "Keyword counts and highlighting for thinking rows: a per-word count chip on the title line (click one to switch that word off), colouring by word once expanded, per-word colour, typeface, bold / italic / underline and whole-word matching, and folded rows counted over the whole chain of thought. The plugin has its own Settings section."
+    "description": "Keyword counts and highlighting for thinking rows: a per-word count chip on the title line (click one to switch that word off; a chip grows and shrinks with its word's size), colouring by word once expanded, per-word tint, text colour, text size (10–22px, the same range DSH's own body text uses), typeface, bold / italic / underline and whole-word matching, and folded rows counted over the whole chain of thought. The plugin has its own Settings section."
   }
 }

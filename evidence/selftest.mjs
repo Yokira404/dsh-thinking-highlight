@@ -141,6 +141,23 @@ class StubElement extends StubNode {
 const document = {
   createElement: (tag) => new StubElement(tag),
   createTextNode: (value) => new StubText(value),
+  body: new StubElement('body'),
+}
+
+/*
+ * The two custom properties the chip's cap reads off `body`. `--dsh-content-font-delta`
+ * is the host's own: `calc(var(--dsh-content-font-size,14px) - 14px)`, published on
+ * `body`, which is where a value has to be resolved from. The stub answers what a real
+ * `getComputedStyle` would for whichever body size the case below installs.
+ */
+let bodyFontSize = 14
+const window = {
+  getComputedStyle: () => ({
+    getPropertyValue(name) {
+      if (name === '--dsh-content-font-delta') return String(bodyFontSize - 14) + 'px'
+      return ''
+    },
+  }),
 }
 
 /* ─────────────────── instantiate the shipped functions ─────────────────── */
@@ -151,11 +168,17 @@ const ns = new Function(
   'document',
   'MARK',
   'DEFAULT_COLOR',
+  'window',
   [
     'const MAX_KEYWORDS = ' + constant('MAX_KEYWORDS'),
     'const WORD_EDGE = ' + constant('WORD_EDGE'),
     'const WORD_HEAD = ' + constant('WORD_HEAD'),
     'const WORD_TAIL = ' + constant('WORD_TAIL'),
+    'const FONT_SIZE_MIN = ' + constant('FONT_SIZE_MIN'),
+    'const FONT_SIZE_MAX = ' + constant('FONT_SIZE_MAX'),
+    'const FONT_SIZE_DEFAULT = ' + constant('FONT_SIZE_DEFAULT'),
+    'const CHIP_SCALE_MIN = ' + constant('CHIP_SCALE_MIN'),
+    'const CHIP_SCALE_MAX = ' + constant('CHIP_SCALE_MAX'),
     'const marks = new WeakMap()',
     extract('escapeRegExp'),
     extract('keywordBody'),
@@ -163,12 +186,18 @@ const ns = new Function(
     extract('countMatches'),
     extract('toTint'),
     extract('hex'),
+    extract('textColor'),
+    extract('fontSize'),
     extract('matchSegments'),
     extract('unwrapBody'),
     extract('wrapNode'),
-    'return { buildPattern, countMatches, toTint, escapeRegExp, matchSegments, wrapNode, unwrapBody, hex, marks }',
+    extract('markStyle'),
+    extract('styleKey'),
+    extract('chipScale'),
+    extract('chipLineCap'),
+    'return { buildPattern, countMatches, toTint, escapeRegExp, matchSegments, wrapNode, unwrapBody, hex, textColor, fontSize, markStyle, styleKey, chipScale, chipLineCap, marks, FONT_SIZE_MIN, FONT_SIZE_MAX, FONT_SIZE_DEFAULT }',
   ].join('\n'),
-)(document, MARK, DEFAULT_COLOR)
+)(document, MARK, DEFAULT_COLOR, window)
 
 /* ─────────────────────────────── cases ─────────────────────────────── */
 
@@ -299,6 +328,96 @@ const items = [
   check('Chinese keywords are locked the same way', ns.countMatches('提示词汇 提示词', { id: 'w3', text: '提示词', color: '#dc2626', whole: true }, false) === 1, ns.countMatches('提示词汇 提示词', { id: 'w3', text: '提示词', color: '#dc2626', whole: true }, false), 1)
   const mixed = ns.buildPattern([{ id: 'w4', text: 'and', color: '#dc2626', whole: true }, { id: 'w5', text: 'is', color: '#2563eb' }], false)
   check('the lock is per keyword, not for the whole list', mixed !== null && 'brand is'.replace(mixed, '#') === 'brand #', mixed === null ? 'null' : 'brand is'.replace(mixed, '#'), 'brand #')
+}
+
+// 13. A keyword's own text colour: absent means "the host's", never a guess.
+{
+  check('no colour is kept as null, not as the default', ns.textColor(undefined) === null && ns.textColor(null) === null && ns.textColor('') === null, JSON.stringify([ns.textColor(undefined), ns.textColor(null), ns.textColor('')]), 'null')
+  check('a colour is normalised to lower-case hex', ns.textColor('#A1B2C3') === '#a1b2c3', String(ns.textColor('#A1B2C3')), '#a1b2c3')
+  check('garbage is refused rather than repainted', ns.textColor('javascript:alert(1)') === null && ns.textColor('#12345') === null, JSON.stringify([ns.textColor('javascript:alert(1)'), ns.textColor('#12345')]), 'null')
+  check('the explicit "follow" spelling also means the host colour', ns.textColor('follow') === null && ns.textColor(' FOLLOW ') === null, JSON.stringify([ns.textColor('follow'), ns.textColor(' FOLLOW ')]), 'null')
+  /* Colour and size travel together as the key that decides whether marks are rebuilt. */
+  const base = { color: '#dc2626', textColor: null, fontSize: 14 }
+  check('the style key is stable for identical styles', ns.styleKey(base) === ns.styleKey({ ...base }), ns.styleKey(base), ns.styleKey({ ...base }))
+  check('a text colour alone changes the style key', ns.styleKey(base) !== ns.styleKey({ ...base, textColor: '#2563eb' }), ns.styleKey({ ...base, textColor: '#2563eb' }), 'different')
+  check('a size alone changes the style key', ns.styleKey(base) !== ns.styleKey({ ...base, fontSize: 18 }), ns.styleKey({ ...base, fontSize: 18 }), 'different')
+  check('a background colour alone changes the style key', ns.styleKey(base) !== ns.styleKey({ ...base, color: '#16a34a' }), ns.styleKey({ ...base, color: '#16a34a' }), 'different')
+  check('an absent text colour matches an explicit null', ns.styleKey({ ...base, textColor: undefined }) === ns.styleKey(base), ns.styleKey({ ...base, textColor: undefined }), ns.styleKey(base))
+}
+
+// 14. The size scale is the host's own, and a chip can never outgrow its line.
+{
+  check('the bounds are the host content size bounds', ns.FONT_SIZE_MIN === 10 && ns.FONT_SIZE_MAX === 22 && ns.FONT_SIZE_DEFAULT === 14, JSON.stringify([ns.FONT_SIZE_MIN, ns.FONT_SIZE_MAX, ns.FONT_SIZE_DEFAULT]), '[10,22,14]')
+  check('a missing size is the reader body size', ns.fontSize(undefined) === 14 && ns.fontSize(null) === 14 && ns.fontSize('') === 14, JSON.stringify([ns.fontSize(undefined), ns.fontSize(null), ns.fontSize('')]), '14')
+  check('a size below the range is clamped up to the minimum', ns.fontSize(2) === 10 && ns.fontSize(-40) === 10, JSON.stringify([ns.fontSize(2), ns.fontSize(-40)]), '10')
+  check('a size above the range is clamped down to the maximum', ns.fontSize(96) === 22 && ns.fontSize(1000) === 22, JSON.stringify([ns.fontSize(96), ns.fontSize(1000)]), '22')
+  check('a fractional size lands on a whole pixel', ns.fontSize(15.6) === 16 && ns.fontSize('17.4px') === 17, JSON.stringify([ns.fontSize(15.6), ns.fontSize('17.4px')]), '16/17')
+  check('the default size leaves a chip exactly as it was', ns.chipScale(14) === 1, String(ns.chipScale(14)), '1')
+  check('the smallest size shrinks the chip', ns.chipScale(10) < 1 && ns.chipScale(10) >= 0.7, String(ns.chipScale(10)), '<1 and >=0.7')
+  check('the largest size grows the chip', ns.chipScale(22) > 1, String(ns.chipScale(22)), '>1')
+  /*
+   * The chip sits on a fixed-height header line, so the scale has to stay inside the
+   * bound whatever arrives — including a stored size from a hand-edited store.
+   */
+  const capped = ns.chipScale(400)
+  const floored = ns.chipScale(-5)
+  check('the chip scale is bounded at both ends', capped <= 1.45 && floored >= 0.7, JSON.stringify([capped, floored]), '<=1.45 and >=0.7')
+  check('an unusable size still yields a usable chip scale', ns.chipScale(undefined) === 1 && ns.chipScale('nonsense') === 1, JSON.stringify([ns.chipScale(undefined), ns.chipScale('nonsense')]), '1')
+}
+
+/*
+ * 14b. The cap that keeps the tallest chip inside the collapsed header line. The host
+ * pins that line to `24px + var(--dsh-content-font-delta)` and clips it, so the chip's
+ * own line height is capped against the very variable the host publishes — read from
+ * `body`, because that is the only place it is defined.
+ */
+{
+  const cap = () => ns.chipLineCap()
+  bodyFontSize = 14
+  check('at the reader body size the cap is the header line less the chip frame', cap() === 'calc(21px + 0px)', String(cap()))
+  bodyFontSize = 22
+  check('a larger reader body size raises the cap with it', cap() === 'calc(21px + 8px)', String(cap()))
+  bodyFontSize = 10
+  check('a smaller reader body size lowers the cap with it', cap() === 'calc(21px + -4px)', String(cap()))
+  /*
+   * The property is only there because the host publishes it. A platform (or a test
+   * double) without it must not turn into a chip with no line height at all.
+   */
+  const withStyle = window.getComputedStyle
+  window.getComputedStyle = () => ({ getPropertyValue: () => '' })
+  check('a missing host variable means no cap, not a broken one', cap() === 'none', String(cap()))
+  window.getComputedStyle = () => ({ getPropertyValue: () => 'not-a-length' })
+  check('a garbage host value is refused, not obeyed', cap() === 'none', String(cap()))
+  window.getComputedStyle = () => ({ getPropertyValue: () => '9999px' })
+  check('an absurd host value is refused too', cap() === 'none', String(cap()))
+  window.getComputedStyle = () => {
+    throw new Error('no computed style here')
+  }
+  check('an unreadable computed style is survivable', cap() === 'none', String(cap()))
+  window.getComputedStyle = withStyle
+  bodyFontSize = 14
+  /* Arithmetic the stylesheet then performs: the capped box plus the frame fits the line. */
+  const tallest = 16 * (1 + (ns.chipScale(22) - 1) * 0.667)
+  check('the tallest chip box fits the 24px header line with its frame', tallest + 2 <= 24, String(tallest + 2), '<=24')
+  const smallest = 16 * (1 + (ns.chipScale(10) - 1) * 0.667)
+  check('the smallest chip box stays readable', smallest >= 12, String(smallest), '>=12')
+}
+
+// 15. What a mark is given: the text style, its own ink and its own size.
+{
+  const plain = ns.markStyle({ color: '#dc2626' })
+  check('a bare keyword still gets a colour and a size', plain.color === 'currentColor' && plain.fontSize === '14px', JSON.stringify(plain), 'currentColor/14px')
+  const inked = ns.markStyle({ color: '#dc2626', textColor: '#2563eb', fontSize: 18 })
+  check('the chosen ink and size ride the mark', inked.color === '#2563eb' && inked.fontSize === '18px', JSON.stringify(inked), '#2563eb/18px')
+  const styled = ns.markStyle({ color: '#dc2626', bold: true, italic: true, underline: true, font: 'mono' })
+  check('bold, italic, underline and the typeface still ride it too', styled.fontWeight === '600' && styled.fontStyle === 'italic' && styled.textDecoration === 'underline' && styled.fontFamily === 'var(--ds-font-family-code)', JSON.stringify(styled), 'all four')
+  check('the background colour never rides the mark', styled.backgroundColor === undefined && inked.backgroundColor === undefined, JSON.stringify([styled.backgroundColor, inked.backgroundColor]), 'undefined')
+  check('no item means no style at all', ns.markStyle(undefined) === null && ns.markStyle(null) === null, String(ns.markStyle(undefined)), 'null')
+  /* A size outside the range cannot reach the DOM as written. */
+  check('an out-of-range size is clamped before it reaches the mark', ns.markStyle({ color: '#dc2626', fontSize: 900 }).fontSize === '22px', ns.markStyle({ color: '#dc2626', fontSize: 900 }).fontSize, '22px')
+  /* Inherited ink must never be written as a literal, or the eye-off rule would have
+     nothing to hand back and a theme flip would leave the word unreadable. */
+  check('the followed colour is written as currentColor, not a fixed hex', ns.markStyle({ color: '#dc2626', textColor: null }).color === 'currentColor', ns.markStyle({ color: '#dc2626', textColor: null }).color, 'currentColor')
 }
 
 /* ─────────────────────────────── report ─────────────────────────────── */

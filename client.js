@@ -35,11 +35,41 @@ window.__ModuleLoader__.load({
     const MARK = 'data-dsh-th'
     const DEFAULT_KEYWORDS = ['提示词', '但']
     const DEFAULT_COLOR = '#dc2626'
+    /*
+     * What the text-colour well offers a keyword that follows the theme. It is a
+     * starting point for the picker, not a decision: the sample is the host's own label
+     * colour, so a reader who accepts it unedited gets text that reads exactly like the
+     * body around it.
+     */
+    const DEFAULT_TEXT_COLOR = '#0f1115'
     const TINT_ALPHA = 0.24
     /** Typefaces a keyword can ask for; `default` keeps whatever the host uses. */
     const FONTS = ['default', 'mono', 'serif']
     /** Upper bound on active keywords, so one wild pattern can never be built. */
     const MAX_KEYWORDS = 200
+    /*
+     * The size scale a keyword may ask for, in px — and it is the host's own:
+     * `@deepseek-ai/dsh-client-ui-theme` declares its content font size as
+     * `Schema.number().step(1).min(10).max(22).default(14)`, and its own stepper
+     * disables the arrows at exactly those two ends. Borrowing the bounds means a
+     * highlighted word can never be larger than the reader's own body text can be,
+     * and a keyword left at the default size stays byte-identical to before.
+     */
+    const FONT_SIZE_MIN = 10
+    const FONT_SIZE_MAX = 22
+    const FONT_SIZE_DEFAULT = 14
+    /*
+     * How far a chip may grow or shrink with its keyword's size. A chip sits on the
+     * header line of a collapsed row, which DSH pins to `calc(24px +
+     * var(--dsh-content-font-delta))` with `contain: size layout`: a chip taller than
+     * that line is clipped instead of read. The bound is set so the tallest chip still
+     * fits there — with the stylesheet's own line-height curve (16 px growing by
+     * two thirds of the factor) the box is 21.2 px plus the chip's 2 px of frame, which
+     * leaves room for the row's own hairline. Below the reader's body size the chip
+     * simply follows the text down.
+     */
+    const CHIP_SCALE_MIN = 0.7
+    const CHIP_SCALE_MAX = 1.45
 
     /* ──────────────────────────── preferences ──────────────────────────── */
 
@@ -53,6 +83,25 @@ window.__ModuleLoader__.load({
     function hex(value) {
       const text = typeof value === 'string' ? value.trim() : ''
       return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toLowerCase() : DEFAULT_COLOR
+    }
+
+    /**
+     * One keyword's own text colour, or null for "keep the host's". Null is a real
+     * value here, not a missing one: it is what leaves the highlight readable after
+     * a theme flip, because the token behind it follows the theme.
+     */
+    function textColor(value) {
+      if (typeof value !== 'string') return null
+      const text = value.trim()
+      if (text === '' || text.toLowerCase() === 'follow') return null
+      return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toLowerCase() : null
+    }
+
+    /** A keyword's size in px, clamped into the host's own range. */
+    function fontSize(value) {
+      const number = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10)
+      if (!Number.isFinite(number)) return FONT_SIZE_DEFAULT
+      return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(number)))
     }
 
     /** Fresh-install defaults; stored fields are merged over these. */
@@ -107,7 +156,68 @@ window.__ModuleLoader__.load({
         bold: row?.bold === true,
         italic: row?.italic === true,
         underline: row?.underline === true,
+        /* The two the style panel gained: the words' own ink, and their size. */
+        textColor: textColor(row?.textColor),
+        fontSize: fontSize(row?.fontSize),
       }
+    }
+
+    /**
+     * Everything about how one keyword's hits look, as one compact string. It is
+     * what tells a row whether its marks have to be built again, so a size or a text
+     * colour that changed has to reach it — and both of those are exactly the kind
+     * of change that leaves the body's text untouched.
+     */
+    function styleKey(item) {
+      const ink = item.textColor === null || item.textColor === undefined ? '' : item.textColor
+      return (
+        String(item.color ?? '') +
+        ink +
+        String(item.fontSize ?? '') +
+        (item.whole === true ? 'W' : '') +
+        (item.bold === true ? 'B' : '') +
+        (item.italic === true ? 'I' : '') +
+        (item.underline === true ? 'U' : '') +
+        String(item.font ?? '')
+      )
+    }
+
+    /**
+     * How large a chip may draw its own text, as a multiplier of its natural size:
+     * the keyword's size against the reader's body size (i.e. the host's default),
+     * bounded so a chip can never outgrow the fixed-height header line it sits on.
+     */
+    function chipScale(size) {
+      const number = fontSize(size)
+      const scale = number / FONT_SIZE_DEFAULT
+      return Math.min(CHIP_SCALE_MAX, Math.max(CHIP_SCALE_MIN, scale))
+    }
+
+    /**
+     * The tallest a chip may draw on the header line of a collapsed row, as a CSS
+     * length. The host pins that line to `calc(24px + var(--dsh-content-font-delta))`
+     * with `contain: size layout`, and `--dsh-content-font-delta` is defined only on
+     * `body` — so a property that has to read it can only be computed here, from a node
+     * inside the document, not authored in the stylesheet's own rules.
+     *
+     * 24px is the line's own height; the 21px below is that height less the chip's 2px
+     * frame and a pixel of slack for the row's hairline. A platform that does not define
+     * the variable gets `none`, which leaves the chip's line height to its scale alone —
+     * the behaviour before this cap existed.
+     */
+    function chipLineCap() {
+      let delta = null
+      try {
+        if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function' && document.body !== null) {
+          const raw = window.getComputedStyle(document.body).getPropertyValue('--dsh-content-font-delta')
+          const value = Number.parseFloat(raw)
+          /* A sane number or nothing: a garbage value must not become a cap. */
+          if (Number.isFinite(value) === true && value >= -20 && value <= 40) delta = value
+        }
+      } catch (error) {
+        /* unreadable custom property: the chip keeps its uncapped line height */
+      }
+      return delta === null ? 'none' : 'calc(21px + ' + delta + 'px)'
     }
 
     /** One keyword row with every field the settings page can set. */
@@ -272,6 +382,13 @@ window.__ModuleLoader__.load({
         styleMenuHint: '颜色、字体、加粗、斜体、下划线',
         style: '样式',
         colorLabel: '颜色',
+        textColorLabel: '文字颜色',
+        follow: '跟随',
+        followHint: '不加自己的颜色，跟随主题的正文色（深浅色切换也不会看不清）',
+        fontSizeLabel: '文字大小',
+        fontSizeUp: '加大一号',
+        fontSizeDown: '减小一号',
+        sizeUnit: 'px',
         font: '字体',
         fontDefault: '默认',
         fontMono: '等宽',
@@ -319,6 +436,13 @@ window.__ModuleLoader__.load({
         styleMenuHint: 'Color, font, bold, italic, underline',
         style: 'Style',
         colorLabel: 'Color',
+        textColorLabel: 'Text color',
+        follow: 'Theme',
+        followHint: 'Add no colour of its own and follow the theme’s body text, so it stays readable in light and dark',
+        fontSizeLabel: 'Text size',
+        fontSizeUp: 'One step larger',
+        fontSizeDown: 'One step smaller',
+        sizeUnit: 'px',
         font: 'Font',
         fontDefault: 'Default',
         fontMono: 'Monospace',
@@ -362,7 +486,19 @@ window.__ModuleLoader__.load({
  */
 .dsh-th-badge-set{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:none;margin-left:8px}
 .dsh-th-chips{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:none;max-width:420px;overflow:hidden}
-.dsh-th-badge{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 6px;border-radius:6px;font:inherit;font-size:12px;line-height:16px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover);border:1px solid transparent;cursor:pointer}
+/*
+ * The chip's own size follows the keyword's. --dsh-th-chip-scale is the factor its size
+ * carries against the reader's body size, and --dsh-th-chip-line is the tallest the
+ * chip may draw: the header line of a collapsed row is pinned by the host to a fixed
+ * height (24px plus its own content-font delta) with containment, so a chip taller than
+ * that line is clipped rather than read. The line height therefore grows by only two
+ * thirds of the factor (the text grows faster than its box) and is capped against a
+ * length the client computes from the host's own variable; where that variable is
+ * missing the cap is none, which is exactly the behaviour before it existed. The
+ * fallback of 1 is what a keyword left at the default size gets, so that chip is exactly
+ * the chip it always was.
+ */
+.dsh-th-badge{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 6px;border-radius:6px;font:inherit;font-size:calc(12px * var(--dsh-th-chip-scale,1));line-height:min(calc(16px * (1 + (var(--dsh-th-chip-scale,1) - 1) * .667)),var(--dsh-th-chip-line,none));color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover);border:1px solid transparent;cursor:pointer}
 .dsh-th-badge[data-count="1"]{color:var(--dsw-alias-label-tertiary)}
 .dsh-th-badge:hover{background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
 .dsh-th-badge:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
@@ -386,10 +522,12 @@ window.__ModuleLoader__.load({
 /*
  * One row switched off with its eye. The marks stay in the DOM — the row has to keep
  * them so switching the eye back on is instant and lossless — so "off" is expressed
- * by neutralising every part of the mark: the tint and the keyword's own type styling
- * (bold/italic/underline/typeface), which otherwise stayed visible with the tint gone.
+ * by neutralising every part of the mark: the tint, the keyword's own type styling
+ * (bold/italic/underline/typeface), its own text colour and its size. Leaving the last
+ * two out would have made the eye a half-switch: a resized or recoloured word stayed
+ * visibly highlighted with its tint gone.
  */
-[data-dsh-hl="off"] .dsh-th-body .dsh-th-hit{background-color:transparent !important;font-weight:inherit !important;font-style:inherit !important;text-decoration:inherit !important;font-family:inherit !important}
+[data-dsh-hl="off"] .dsh-th-body .dsh-th-hit{background-color:transparent !important;font-weight:inherit !important;font-style:inherit !important;text-decoration:inherit !important;font-family:inherit !important;color:inherit !important;font-size:inherit !important}
 /*
  * The settings page follows the host's own settings rows (the .PgWN5G_row rule in
  * @deepseek-ai/dsh-client-ui-settings-general, mirrored here): label and description
@@ -456,6 +594,23 @@ window.__ModuleLoader__.load({
 .dsh-th-swatch{position:absolute;inset:0;width:100%;height:100%;opacity:0;padding:0;border:0;cursor:pointer}
 .dsh-th-dot{width:14px;height:14px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2)}
 .dsh-th-hex{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+/* "Follow the theme": a plain chip that hands one value back to the host. It reads as
+   switched on when the value is nothing but the host's, because that is what it means. */
+.dsh-th-follow{height:32px;padding:0 10px;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.dsh-th-follow:hover{color:var(--dsw-alias-label-primary)}
+.dsh-th-follow[data-following]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-weight:600}
+.dsh-th-follow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+/* The size stepper, in the host's own shape: the value centred, the two arrows stacked
+   at its right, and each arrow disabled at the end of the host's own range. */
+.dsh-th-size{display:inline-flex;align-items:center;height:32px;padding:0 6px 0 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+.dsh-th-sizeValue{min-width:2ch;text-align:center;font-size:12px;line-height:18px;font-variant-numeric:tabular-nums}
+.dsh-th-sizeUnit{padding-left:2px;font-size:11px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+.dsh-th-sizeArrows{display:inline-flex;flex-direction:column;margin-left:4px}
+.dsh-th-arrow{display:inline-flex;align-items:center;justify-content:center;width:16px;height:12px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.dsh-th-arrow:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+/* At either end of the host's range the arrow that would leave it stays visible but dead. */
+.dsh-th-arrow:disabled{color:var(--dsw-alias-label-dimmed);cursor:not-allowed}
+.dsh-th-arrow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .dsh-th-mute{flex:none;height:36px;padding:0 14px;border:0;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
 .dsh-th-mute:hover{color:var(--dsw-alias-label-primary)}
 .dsh-th-mute[aria-pressed="true"]{background:transparent;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l2);color:var(--dsw-alias-label-dimmed)}
@@ -546,6 +701,22 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** One arrow of the size stepper; `up` picks the direction it points. */
+    function StepIcon(props) {
+      return React.createElement(
+        'svg',
+        { viewBox: '0 0 10 6', width: 9, height: 6, 'aria-hidden': 'true', focusable: 'false' },
+        React.createElement('path', {
+          d: props.up === true ? 'M1 5 5 1 9 5' : 'M1 1 5 5 9 1',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.4,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      )
+    }
+
     function PlusIcon() {
       return React.createElement(
         'svg',
@@ -622,10 +793,15 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The extra inline style one keyword's marks carry — bold, italic, underline,
-     * the typeface — or null when the keyword asks for none. The chip's name uses
-     * the same object, so what a keyword looks like is visible before you open a row.
-     * The color is deliberately not part of it: that one rides the frame and the tint.
+     * The inline style one keyword's marks carry — bold, italic, underline, the
+     * typeface, the keyword's own text colour and its size — or null when the
+     * keyword asks for none. The chip's name uses the same object, so what a keyword
+     * looks like is visible before you open a row. The background colour is
+     * deliberately not part of it: that one rides the frame and the tint.
+     *
+     * The text colour falls back to `currentColor`, which is what the marked word
+     * already inherits from the body around it — so "follow the theme" needs no
+     * separate code path and survives a theme flip.
      */
     function markStyle(item) {
       if (item === undefined || item === null) return null
@@ -635,7 +811,9 @@ window.__ModuleLoader__.load({
       if (item.underline === true) style.textDecoration = 'underline'
       if (item.font === 'mono') style.fontFamily = 'var(--ds-font-family-code)'
       else if (item.font === 'serif') style.fontFamily = 'Georgia, "Times New Roman", serif'
-      return Object.keys(style).length === 0 ? null : style
+      style.color = item.textColor === null || item.textColor === undefined ? 'currentColor' : item.textColor
+      style.fontSize = fontSize(item.fontSize) + 'px'
+      return style
     }
 
     function toTint(color, alpha) {
@@ -960,6 +1138,30 @@ window.__ModuleLoader__.load({
       for (const item of counts) {
         const muted = item.muted === true
         const hint = item.text + ' × ' + item.count + ' · ' + (muted ? options.labels.chipUnmute : options.labels.chipMute)
+        /*
+         * The chip's own size follows its keyword's: the reader set the size to make
+         * that word stand out, so a chip still drawn at the default size would
+         * contradict the word it points at. `--dsh-th-chip-scale` carries the factor and
+         * the stylesheet applies it to the chip's font size and line height; its padding
+         * and radius stay as they are, because the box a chip draws must not grow a
+         * second time with the text inside it.
+         *
+         * The keyword's color rides the chip's own frame, and only an un-muted chip
+         * carries it. The name keeps the host's text color and the chip keeps its
+         * neutral background, so the name can never end up the same color as the
+         * surface behind it; a muted chip is expressed by the stylesheet's dashed,
+         * dimmed frame alone.
+         */
+        const chipStyle = { '--dsh-th-chip-scale': String(chipScale(item.fontSize)) }
+        if (muted !== true) chipStyle.borderColor = colors[item.text]
+        /*
+         * The tallest the chip may draw. The host's variable is resolved here rather
+         * than in the stylesheet because it has to be arithmetic on a host value: the
+         * chip may take the header line's height minus the 2px its own frame adds.
+         * `none` (the fallback) means the variable is missing, and then the chip keeps
+         * the line height it derived from its scale alone.
+         */
+        chipStyle['--dsh-th-chip-line'] = options.chipLine ?? chipLineCap()
         chips.push(
           React.createElement(
             'button',
@@ -972,14 +1174,7 @@ window.__ModuleLoader__.load({
               'aria-pressed': muted ? 'false' : 'true',
               'aria-label': hint,
               title: hint,
-              /*
-               * The keyword's color rides the chip's own frame. The name keeps the
-               * host's text color and the chip keeps its neutral background, so the
-               * name can never end up the same color as the surface behind it. A
-               * muted chip carries no inline color at all: the stylesheet's dashed,
-               * dimmed frame is what says "off".
-               */
-              style: muted ? undefined : { borderColor: colors[item.text] },
+              style: chipStyle,
               /*
                * The chip is also this keyword's switch. The click stops at the
                * chip so it cannot also fold or unfold the row it sits on.
@@ -1053,9 +1248,9 @@ window.__ModuleLoader__.load({
         seat.parent.insertBefore(entry.mount, seat.before)
       }
       /*
-       * The key covers everything a chip shows: its count, its off state, the text
-       * style its name previews — and the language of its label and tooltip, which
-       * changes with nothing else on the row.
+       * The key covers everything a chip shows: its count, its off state, the size it
+       * draws at, the text style its name previews — and the language of its label and
+       * tooltip, which changes with nothing else on the row.
        */
       const key =
         counts
@@ -1065,10 +1260,9 @@ window.__ModuleLoader__.load({
               ':' +
               item.count +
               (item.muted === true ? '!' : '') +
-              (item.bold === true ? 'B' : '') +
-              (item.italic === true ? 'I' : '') +
-              (item.underline === true ? 'U' : '') +
-              String(item.font ?? ''),
+              'z' +
+              String(chipScale(item.fontSize)) +
+              styleKey(item),
           )
           .join('|') +
         '#' +
@@ -1336,6 +1530,8 @@ window.__ModuleLoader__.load({
               bold: item.bold === true,
               italic: item.italic === true,
               underline: item.underline === true,
+              textColor: item.textColor ?? null,
+              fontSize: item.fontSize,
             })
           }
         }
@@ -1481,6 +1677,8 @@ window.__ModuleLoader__.load({
             bold: row.bold === true,
             italic: row.italic === true,
             underline: row.underline === true,
+            textColor: row.textColor ?? null,
+            fontSize: row.fontSize,
           })
         }
         /*
@@ -1488,13 +1686,18 @@ window.__ModuleLoader__.load({
          * what tells every row to drop its body cache and mark the text again.
          */
         const patternKey =
-          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + items.map((item) => item.id + '=' + item.text + item.color + (item.whole === true ? 'W' : '') + (item.bold === true ? 'B' : '') + (item.italic === true ? 'I' : '') + (item.underline === true ? 'U' : '') + item.font).join(',')
+          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + items.map((item) => item.id + '=' + item.text + styleKey(item)).join(',')
         /*
          * What a chip click does: one keyword in or out of the muted list, persisted
          * like any other setting. Every row hears about it on the next pass, so a
          * chip clicked in one row switches that keyword off everywhere.
          */
         const toggleKeyword = (id) => patch({ muted: toggleIn(settings.muted, id) })
+        /*
+         * The tallest a chip may draw, read once for the whole pass instead of once per
+         * chip: it is a computed-style lookup on `body`, and every row's chips share it.
+         */
+        const chipLine = chipLineCap()
         for (const root of liveRoots()) {
           try {
             reconcileRow(root, {
@@ -1507,6 +1710,7 @@ window.__ModuleLoader__.load({
               /* A control inside a row (the eye) can ask for a pass by itself. */
               requestPass: schedule,
               labels,
+              chipLine,
               /* The language is a rendering concern of its own: see `labelsChanged`. */
               lang: settings.lang,
               labelsKey: settings.lang,
@@ -1624,6 +1828,13 @@ window.__ModuleLoader__.load({
         props.onCommitText(draft)
         setDraft(null)
       }
+      /*
+       * What the colour well shows for a keyword that follows the theme. It has to be a
+       * concrete colour — an `<input type="color">` cannot express "nothing" — and it is
+       * deliberately not the keyword's background colour: offering that would hide the
+       * text the moment the reader accepted it.
+       */
+      const shownInk = row.textColor ?? textColor(DEFAULT_TEXT_COLOR)
       const styleOf = (letter, field, value, label) =>
         React.createElement(
           'button',
@@ -1737,6 +1948,90 @@ window.__ModuleLoader__.load({
                 }),
                 React.createElement('span', { className: 'dsh-th-dot', style: { backgroundColor: row.color } }),
                 React.createElement('span', { className: 'dsh-th-hex' }, row.color.toUpperCase()),
+              ),
+              /*
+               * The words' own colour. "Follow" is the default and stays available
+               * rather than being a one-way door: a keyword that took a colour can give
+               * it back, which is the only way to undo a choice made in the wrong theme.
+               */
+              React.createElement('span', { className: 'dsh-th-panelLabel' }, props.textColorLabel),
+              React.createElement(
+                'label',
+                { className: 'dsh-th-color', title: shownInk },
+                React.createElement('input', {
+                  className: 'dsh-th-swatch',
+                  type: 'color',
+                  value: shownInk,
+                  'aria-label': props.textColorLabel,
+                  onChange: (event) => props.onInk(event.target.value),
+                }),
+                React.createElement('span', {
+                  className: 'dsh-th-dot',
+                  'data-dsh-th': 'ink-dot',
+                  /*
+                   * `currentColor` resolves against this dot's own inherited colour —
+                   * the panel's text colour, which the host paints from its theme — so
+                   * the swatch previews exactly what "follow the theme" looks like.
+                   */
+                  style: { backgroundColor: row.textColor === null ? 'currentColor' : shownInk },
+                }),
+                React.createElement('span', { className: 'dsh-th-hex' }, row.textColor === null ? props.follow : shownInk.toUpperCase()),
+              ),
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-th-follow',
+                  'data-dsh-th': 'ink-follow',
+                  'data-following': row.textColor === null ? '1' : undefined,
+                  'aria-pressed': row.textColor === null ? 'true' : 'false',
+                  'aria-label': props.followLabel,
+                  title: props.followHint,
+                  onClick: () => props.onInk(null),
+                },
+                props.followLabel,
+              ),
+              /*
+               * The size. Its arrows walk the host's own scale — the theme plugin's
+               * content font size is a number stepped by 1 between 10 and 22 — so the
+               * ends of this stepper and the ends of the host's are the same two ends.
+               */
+              React.createElement('span', { className: 'dsh-th-panelLabel' }, props.fontSizeLabel),
+              React.createElement(
+                'div',
+                { className: 'dsh-th-size', 'data-dsh-th': 'size' },
+                React.createElement('span', { className: 'dsh-th-sizeValue', 'data-dsh-th': 'size-value' }, String(row.fontSize)),
+                React.createElement('span', { className: 'dsh-th-sizeUnit' }, props.sizeUnit),
+                React.createElement(
+                  'span',
+                  { className: 'dsh-th-sizeArrows' },
+                  React.createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dsh-th-arrow',
+                      'data-dsh-th': 'size-up',
+                      disabled: row.fontSize >= FONT_SIZE_MAX,
+                      'aria-label': props.fontSizeUp,
+                      title: props.fontSizeUp,
+                      onClick: () => props.onSize(row.fontSize + 1),
+                    },
+                    React.createElement(StepIcon, { up: true }),
+                  ),
+                  React.createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dsh-th-arrow',
+                      'data-dsh-th': 'size-down',
+                      disabled: row.fontSize <= FONT_SIZE_MIN,
+                      'aria-label': props.fontSizeDown,
+                      title: props.fontSizeDown,
+                      onClick: () => props.onSize(row.fontSize - 1),
+                    },
+                    React.createElement(StepIcon, { up: false }),
+                  ),
+                ),
               ),
               React.createElement('span', { className: 'dsh-th-panelLabel' }, props.fontLabel),
               React.createElement(
@@ -1905,6 +2200,13 @@ window.__ModuleLoader__.load({
                     muted: settings.muted.includes(row.id),
                     placeholder: labels.keywordPlaceholder,
                     colorLabel: labels.colorLabel,
+                    textColorLabel: labels.textColorLabel,
+                    followLabel: labels.follow,
+                    followHint: labels.followHint,
+                    fontSizeLabel: labels.fontSizeLabel,
+                    fontSizeUp: labels.fontSizeUp,
+                    fontSizeDown: labels.fontSizeDown,
+                    sizeUnit: labels.sizeUnit,
                     removeLabel: labels.remove,
                     muteLabel: labels.mute,
                     unmuteLabel: labels.unmute,
@@ -1924,6 +2226,12 @@ window.__ModuleLoader__.load({
                     onEdit: () => setRejected(null),
                     warning: rejected !== null && rejected.id === row.id ? labels.duplicate + ' 「' + rejected.text + '」' : undefined,
                     onColor: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, color: hex(value) } : item))),
+                    /*
+                     * `null` from the "Theme" button is not a missing value: it is the
+                     * setting that says "leave the words the host's own colour".
+                     */
+                    onInk: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, textColor: textColor(value) } : item))),
+                    onSize: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, fontSize: fontSize(value) } : item))),
                     onWhole: (value) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, whole: value === true } : item))),
                     onStyle: (changes) => setRows(settings.rows.map((item, at) => (at === index ? { ...item, ...changes } : item))),
                     onMute: () => patch({ muted: toggleIn(settings.muted, row.id) }),
@@ -2191,6 +2499,11 @@ window.__ModuleLoader__.load({
               wrapNode,
               unwrapBody,
               hex,
+              textColor,
+              fontSize,
+              styleKey,
+              chipScale,
+              markStyle,
               unmarkedText,
               liftSeatOf,
               liftForRow,

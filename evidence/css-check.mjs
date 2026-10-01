@@ -58,6 +58,8 @@ check('the page title is bold and a step larger', /\.dsh-th-heading\{[^}]*font-s
  * The eye keeps the marks in the DOM and hides them here, so this rule is the whole
  * of "off": it has to neutralise the keyword's own type styling too, not just the tint
  * (a bold keyword stayed bold with its tint gone, which reads as "off did not work").
+ * The text colour and the size are part of that: leaving them out would make the eye a
+ * half-switch, with a recoloured or resized word still standing out with its tint gone.
  */
 check(
   'an eye-off row neutralises the tint and the keyword type styling',
@@ -65,9 +67,33 @@ check(
     /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*font-weight:inherit !important/.test(css) &&
     /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*font-style:inherit !important/.test(css) &&
     /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*text-decoration:inherit !important/.test(css) &&
-    /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*font-family:inherit !important/.test(css),
+    /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*font-family:inherit !important/.test(css) &&
+    /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*color:inherit !important/.test(css) &&
+    /\[data-dsh-hl="off"\] \.dsh-th-body \.dsh-th-hit\{[^}]*font-size:inherit !important/.test(css),
   'present',
 )
+/*
+ * The chip scales with its keyword's size, and it has to do so through the factors the
+ * chip element carries: a chip on a collapsed row sits on a fixed-height header line, so
+ * the scale is what bounds its growth and the line cap is what keeps it inside that line.
+ * The fallbacks matter too — a keyword left at the default size is then exactly the chip
+ * it always was, and a platform without the host's variable is not left with no height.
+ */
+check(
+  'the chip scales with its keyword through its own factor',
+  /\.dsh-th-badge\{[^}]*font-size:calc\(12px \* var\(--dsh-th-chip-scale,1\)\)/.test(css) &&
+    /\.dsh-th-badge\{[^}]*line-height:min\(calc\(16px \* \(1 \+ \(var\(--dsh-th-chip-scale,1\) - 1\) \* \.667\)\),var\(--dsh-th-chip-line,none\)\)/.test(css),
+  'present',
+)
+/* Padding stays in px: the chip's box must not grow a second time with its text. */
+check('the chip keeps its own box measurements fixed', /\.dsh-th-badge\{[^}]*padding:0 6px/.test(css) && /\.dsh-th-badge\{[^}]*gap:4px/.test(css), 'present')
+check('the text colour and size controls have their rules', css.includes('.dsh-th-follow{') && css.includes('.dsh-th-size{') && css.includes('.dsh-th-arrow{'), 'present')
+check(
+  'a stepper arrow at either end of the range reads as dead',
+  /\.dsh-th-arrow:disabled\{[^}]*cursor:not-allowed/.test(css),
+  'present',
+)
+check('the panel no longer hard-codes a chip size', /\.dsh-th-badge\{[^}]*font-size:12px/.test(css) === false, 'absent')
 const stray = css.split('\n').find((line) => line.includes('`'))
 check('the literal closes at a line of its own', end > 0 && stray === undefined, stray === undefined ? 'ok' : 'stray line: ' + stray.trim())
 

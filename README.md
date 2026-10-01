@@ -12,15 +12,17 @@ section in Settings.
 - **Click a chip to switch that keyword off** — the word stops being highlighted everywhere, the chip stays
   in place in a muted state and the same click turns it back on. The choice is remembered.
 - **Highlighting** — expand a row and every occurrence of a keyword is tinted with that keyword's own colour.
-  The text itself is never recoloured, so nothing becomes unreadable.
-- **Per-keyword colour and text style** — colour, typeface (default / monospace / serif), bold, italic,
-  underline. What you set is what both the highlight and the chip show.
+- **Per-keyword colour, ink and text style** — the highlight's tint, the words' own text colour (or *Theme*, which
+  keeps the host's, so a light/dark flip never leaves a word unreadable), a size on the host's own scale
+  (10–22 px, the same range DSH's own content font size uses), typeface (default / monospace / serif), bold,
+  italic and underline. What you set is what both the highlight and the chip show, and the chip grows and
+  shrinks with its keyword's size.
 - **Whole-word matching** — per keyword: `is` either matches everywhere or only where it stands alone
   (never inside `this` or `ThisIs`).
 - **Folded rows count the whole chain of thought** — the numbers do not change when you expand a row.
 - **Per-row eye** — one row's highlighting can be hidden without touching the others. The marks stay in the
-  text while a row is switched off and the stylesheet hides them (tint *and* the keyword's own type styling),
-  so switching the eye back on is instant and never leaves another keyword unhighlighted.
+  text while a row is switched off and the stylesheet hides them (tint, text colour, size *and* the keyword's
+  own type styling), so switching the eye back on is instant and never leaves another keyword unhighlighted.
 - **One row per keyword** — typing a word that already exists is refused, with a note saying why.
 
 ## Install
@@ -58,7 +60,7 @@ through pnpm.
 | Expand lifts the box (off by default) | DSH folds a turn's process into a scroll box capped at 400px; with this on, an expanded row temporarily drops that cap so a long chain of thought can be read without scrolling inside the box |
 | Case sensitive | Off (default): `is` also matches `IS` |
 | Keywords | One row per word: text field, `▸ style`, `完整词 / whole word`, suppress, delete |
-| ▸ style panel | Colour, font, **B**old, **I**talic, **U**nderline for that keyword |
+| ▸ style panel | Tint colour, text colour (**Theme** hands it back to the host), text size (10–22 px stepper), font, **B**old, **I**talic, **U**nderline for that keyword |
 
 Settings live in the browser's `localStorage` and apply immediately.
 
@@ -87,6 +89,14 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
 - The per-row eye is a presentation switch, not a filter on the work: a row keeps its marks while it is
   switched off (`[data-dsh-hl="off"]` neutralises them) so that muting a keyword, streaming or a host
   re-render during that time cannot leave the row with nothing to show when the eye comes back on.
+- A keyword that asks for no text colour is marked as `color: currentColor` rather than a fixed hex, so
+  "follow the theme" needs no second code path — and the eye-off rule has an inherited value to hand back.
+- The chip's size rides a `--dsh-th-chip-scale` factor on the chip element; the stylesheet grows the chip's line
+  height more slowly than its text and caps it with `--dsh-th-chip-line`, a length the client computes from the
+  host's own `--dsh-content-font-delta` — a chip on a collapsed row sits on a header line the host pins to a
+  fixed height with `contain: size layout`, where an oversized chip would be clipped instead of read. The
+  variable is published on `body`, which is why the cap has to be computed at decoration time: reading it is
+  only possible from a node inside the document, and no stylesheet rule of ours is scoped to `body`.
 - A folded row has no body to read: the host only mounts the chain of thought while expanded, and the whole
   text lives in the host component's `text` prop. The plugin reaches it through the fiber React attaches to
   every element it created (`__reactFiber$…`); anything unexpected reads as "unavailable" and the DOM text is
@@ -98,6 +108,9 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   those internals can require an update here; when a lookup fails the plugin degrades to doing less, never to
   breaking the transcript. `evidence/host-shape.mjs` models the installed markup and also asserts the markers
   it depends on are still present in the app's own bundle, so a DSH rename fails a test instead of going quiet.
+- The 10–22 px size range is not the plugin's own: it is the host theme plugin's content font size
+  (`min(10).max(22).default(14)`). The plugin cannot read the host's schema at runtime, so `host-shape.mjs`
+  asserts those two numbers are still in that bundle — a DSH release that changes the range fails a test first.
 - Per-keyword suppression applies to **all rows** (the chip is the same keyword everywhere). The per-row eye is
   the per-row control.
 - *Expand lifts the box* is the one setting that reaches into host layout, which is why it ships off.
@@ -107,11 +120,11 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
 ## Development
 
 ```bash
-node evidence/selftest.mjs         #  27 checks: splitting, undoing, counting, case, colour, whole-word edges
-node evidence/client-harness.mjs   # 102 checks: the browser half really runs, against a stubbed host
-node evidence/css-check.mjs        #  19 checks: the stylesheet literal (braces, chip/row/panel rules)
-node evidence/locale-check.mjs     #   8 checks: package meta, both locale files and the version tag agree
-node evidence/host-shape.mjs       #  25 checks: the installed row markup, plus its markers in the app bundle
+node evidence/selftest.mjs         #  62 checks: splitting, undoing, counting, case, colour, size, whole-word edges
+node evidence/client-harness.mjs   # 131 checks: the browser half really runs, against a stubbed host
+node evidence/css-check.mjs        #  26 checks: the stylesheet literal (braces, chip/row/panel rules)
+node evidence/locale-check.mjs     #   9 checks: package meta, both locale files and the version tag agree
+node evidence/host-shape.mjs       #  27 checks: the installed row markup, plus its markers in the app bundle
 node evidence/e2e-bundle.mjs <page-url-with-token> @Yokira404/dsh-thinking-highlight <cookie>
 ```
 
