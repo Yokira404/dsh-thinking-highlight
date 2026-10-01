@@ -1350,6 +1350,30 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
   }
 }
 
+/*
+ * 22. The page-state probe. This exists for exactly the situation where everything else
+ * looks healthy — the module registered, the settings page renders — and yet no chips
+ * appear: it reports what the plugin can see from inside the running page, so "there are
+ * no reasoning rows here" can be told apart from "the chips never landed". It must be
+ * off unless asked for (it writes on every pass), and asking must be cheap and reversible.
+ */
+{
+  try {
+    const diagnose = runtime0()?.diagnose
+    check('the runtime exposes diagnose', typeof diagnose === 'function', typeof diagnose)
+    if (typeof diagnose === 'function') {
+      const on = diagnose()
+      check('diagnose reports the rows it can see right now', typeof on?.reasoningRowsNow === 'number' && on.reasoningRowsNow === runtime0().rows().length, JSON.stringify(on))
+      check('diagnose reports the keyword count and the switch', typeof on?.keywords === 'number' && typeof on?.enabled === 'boolean', JSON.stringify(on))
+      check('diagnose says how to read its output', typeof on?.probe === 'string' && on.probe.includes('dsh-thinking-highlight.state.probe'), JSON.stringify(on.probe))
+      const off = diagnose(false)
+      check('diagnose can be switched back off', typeof off?.probe === 'string' && off.probe.startsWith('off'), JSON.stringify(off.probe))
+    }
+  } catch (error) {
+    check('the diagnose probes run', false, String(error && error.stack ? error.stack : error))
+  }
+}
+
 let failed = 0
 for (const result of results) {
   if (!result.pass) failed += 1

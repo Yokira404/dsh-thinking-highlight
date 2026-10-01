@@ -121,7 +121,7 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 
 ```bash
 node evidence/selftest.mjs         #  62 项：切分/还原/计数/大小写/颜色/字号/完整词边界
-node evidence/client-harness.mjs   # 131 项：浏览器半边在桩宿主里真的跑起来
+node evidence/client-harness.mjs   # 136 项：浏览器半边在桩宿主里真的跑起来
 node evidence/css-check.mjs        #  26 项：样式表字面量（括号、徽章/行/面板规则）
 node evidence/locale-check.mjs     #   9 项：包 meta、两个语言文件与版本号互相对得上
 node evidence/host-shape.mjs       #  27 项：安装版的真实行结构与正文字号区间，以及它在应用 bundle 里的标记
@@ -150,7 +150,13 @@ SKIP 而不是失败。
 | `docs/` | 上面那几张截图 |
 
 运行期可以在控制台用 `window.__DSH_TH__`：`settings()`、`rows()`（`{ highlighted, count, hasBadges, marked,
-folded }`）、`refresh()`、`clear()`、`pass()`、`passes()`。
+folded }`）、`refresh()`、`clear()`、`pass()`、`passes()`、`diagnose()`。
+
+`diagnose()` 是给这种情况用的：插件显然加载了（设置页都在），偏偏徽章不出来。它会打开一个页面状态探针，
+回答其它接口答不了的那个问题——**插件在这个页面上到底有没有看到思考行**。它会返回当前计数；刷新页面后，
+每一趟 pass 都会把看到的东西写进 `localStorage['dsh-thinking-highlight.state.probe']`：存下来的设置、
+最后一趟的行数与词数，以及每一行的记录（计数、徽章在不在、标记是否还在文档里、是否折叠、是否展开）。
+默认关闭，因为它每趟都会写；`diagnose(false)` 可以关回去。
 
 ## 卸载
 

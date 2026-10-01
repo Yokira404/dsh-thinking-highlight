@@ -1645,6 +1645,11 @@ window.__ModuleLoader__.load({
     function startDecorating(handle) {
       let scheduled = 0
       let sweeps = 0
+      /* Off unless the reader asked for it: see `reportProbe`. */
+      let probeOn = false
+      handle.setProbe = (on) => {
+        probeOn = on === true
+      }
       const run = () => {
         scheduled = 0
         if (document.body === null) {
@@ -1698,7 +1703,9 @@ window.__ModuleLoader__.load({
          * chip: it is a computed-style lookup on `body`, and every row's chips share it.
          */
         const chipLine = chipLineCap()
-        for (const root of liveRoots()) {
+        const roots = liveRoots()
+        let decorated = 0
+        for (const root of roots) {
           try {
             reconcileRow(root, {
               items,
@@ -1716,11 +1723,30 @@ window.__ModuleLoader__.load({
               labelsKey: settings.lang,
               patternKey,
             })
+            /*
+             * What the last pass actually found, kept for the diagnostics below: the
+             * difference between "no reasoning rows on this page" and "rows are here but
+             * the chips never landed" is invisible from outside, and it is the first thing
+             * anyone asking why nothing shows up needs to know.
+             */
+            if (root.querySelector('[' + MARK + '="badges"]') !== null) decorated += 1
           } catch (error) {
             console.error('[' + NS + '] decorate failed', error)
           }
         }
+        handle.lastPass = {
+          at: new Date().toISOString(),
+          rows: roots.length,
+          decorated,
+          keywords: items.length,
+          muted: muted.size,
+          enabled: settings.enabled === true,
+          chipsWhenCollapsed: settings.chipsWhenCollapsed === true,
+          lang: settings.lang,
+          passes: sweeps + 1,
+        }
         sweeps += 1
+        if (probeOn === true) reportProbe(handle)
         if (sweeps % 8 === 0) sweepRows()
         /* Caps last: the loop above is what asks for them. */
         sweepLifts(settings.liftOnExpand === true)
@@ -2307,6 +2333,48 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Write the plugin's own view of the page to localStorage, so a reader who is
+     * looking at a transcript where nothing appears can say what the plugin sees
+     * instead of describing the symptom. This is the one question the cheaper
+     * markers cannot answer: "the module ran, but did it ever find a reasoning row?"
+     *
+     * Opt-in, because it writes on every pass (a 90 ms-coalesced cadence) and an
+     * unconditional write would be a permanent cost for every user. Call
+     * `window.__DSH_TH__.diagnose()` once in the console, reload, then read
+     * `localStorage['dsh-thinking-highlight.state.probe']`.
+     */
+    function reportProbe(handle) {
+      const rows = []
+      for (const root of liveRoots()) {
+        const entry = rows.get(root)
+        const header = headerRowOf(root)
+        rows.push({
+          count: entry?.count ?? 0,
+          highlighted: entry?.highlighted ?? true,
+          badges: root.querySelector('[' + MARK + '="badges"]') !== null,
+          marked: entry?.sample === undefined ? false : entry.sample.isConnected === true,
+          folded: entry?.folded === true,
+          expanded: header === null ? null : isExpanded(root, header),
+          body: bodyOf(root) !== null,
+        })
+      }
+      try {
+        window.localStorage.setItem(
+          'dsh-thinking-highlight.state.probe',
+          JSON.stringify({
+            version: VERSION,
+            at: new Date().toISOString(),
+            state: snapshot,
+            lastPass: handle.lastPass ?? null,
+            rows,
+          }),
+        )
+      } catch (error) {
+        /* diagnostics must never be the failure */
+      }
+    }
+
     /** This page's id in the settings ledger: the nav row and the slot key. */
     const SECTION_ID = NS
     /** Child list other rows can register into; the page renders it after its own rows. */
@@ -2456,6 +2524,22 @@ window.__ModuleLoader__.load({
           const runtime = {
             version: VERSION,
             settings: () => snapshot,
+            /*
+             * Turn the page-state probe on (it then writes on every pass) and report the
+             * one thing a reader can act on immediately: whether a reasoning row exists
+             * on this page at all. Everything it writes goes to localStorage under
+             * 'dsh-thinking-highlight.state.probe'; reload the page afterwards so a
+             * fresh pass fills it in.
+             */
+            diagnose: (on = true) => {
+              if (typeof handle.setProbe === 'function') handle.setProbe(on !== false)
+              return {
+                probe: on !== false ? 'on — reload the page, then read localStorage["dsh-thinking-highlight.state.probe"]' : 'off',
+                reasoningRowsNow: liveRoots().length,
+                keywords: snapshot.rows.length,
+                enabled: snapshot.enabled === true,
+              }
+            },
             rows: () =>
               liveRoots().map((root) => {
                 const entry = rows.get(root)

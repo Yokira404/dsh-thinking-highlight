@@ -143,7 +143,7 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
 
 ```bash
 node evidence/selftest.mjs         #  62 checks: splitting, undoing, counting, case, colour, size, whole-word edges
-node evidence/client-harness.mjs   # 131 checks: the browser half really runs, against a stubbed host
+node evidence/client-harness.mjs   # 136 checks: the browser half really runs, against a stubbed host
 node evidence/css-check.mjs        #  26 checks: the stylesheet literal (braces, chip/row/panel rules)
 node evidence/locale-check.mjs     #   9 checks: package meta, both locale files and the version tag agree
 node evidence/host-shape.mjs       #  27 checks: the installed row markup, plus its markers in the app bundle
@@ -173,7 +173,15 @@ the browser half, and the served bundle is byte-identical (sha256) to `client.js
 | `docs/` | the screenshots used above |
 
 At runtime, `window.__DSH_TH__` exposes `settings()`, `rows()` (`{ highlighted, count, hasBadges, marked,
-folded }`), `refresh()`, `clear()`, `pass()` and `passes()` for poking at the decoration from the console.
+folded }`), `refresh()`, `clear()`, `pass()`, `passes()` and `diagnose()` for poking at the decoration from the
+console.
+
+`diagnose()` covers the case where the plugin has clearly loaded — its settings page is there — and yet no chips
+appear. It switches on a page-state probe and answers the one question the other seams cannot: does the plugin
+see any reasoning row on this page at all? It returns the current counts; reload, and every pass then writes
+what it found to `localStorage['dsh-thinking-highlight.state.probe']` — the stored settings, the last pass's row
+and keyword counts, and a per-row record (count, chips present, marks still in the document, folded, expanded).
+It is off by default because it writes on every pass; `diagnose(false)` turns it back off.
 
 ## Uninstall
 
