@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.3.0'
+    const VERSION = '1.3.1'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -1649,6 +1649,7 @@ window.__ModuleLoader__.load({
       let probeOn = false
       handle.setProbe = (on) => {
         probeOn = on === true
+        if (probeOn === true) watchErrors(handle)
       }
       const run = () => {
         scheduled = 0
@@ -2367,12 +2368,41 @@ window.__ModuleLoader__.load({
             at: new Date().toISOString(),
             state: snapshot,
             lastPass: handle.lastPass ?? null,
+            /*
+             * Uncaught errors seen while the probe was on. A browser half that throws
+             * before it decorates anything looks exactly like one that never ran, and
+             * the console that would say so is the one thing a report cannot carry.
+             */
+            errors: handle.probeErrors ?? [],
             rows,
           }),
         )
       } catch (error) {
         /* diagnostics must never be the failure */
       }
+    }
+
+    /**
+     * Start collecting uncaught errors, so the probe can carry them. Installed once, and
+     * only while diagnosis is on: the handler is a permanent cost and an error listener
+     * every user never asked for is not worth the convenience.
+     */
+    function watchErrors(handle) {
+      if (handle.errorWatch === true) return
+      handle.errorWatch = true
+      handle.probeErrors = []
+      if (typeof window.addEventListener !== 'function') return
+      window.addEventListener('error', (event) => {
+        const list = handle.probeErrors ?? []
+        const message = event?.message ?? String(event?.error ?? 'unknown error')
+        list.push({
+          at: new Date().toISOString(),
+          message: String(message).slice(0, 300),
+          source: String(event?.filename ?? '').split('/').pop() + ':' + String(event?.lineno ?? ''),
+        })
+        /* Only the tail matters, and an unbounded list would be its own leak. */
+        handle.probeErrors = list.slice(-5)
+      })
     }
 
     /** This page's id in the settings ledger: the nav row and the slot key. */
