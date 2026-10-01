@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.3.1'
+    const VERSION = '1.3.2'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -2346,11 +2346,13 @@ window.__ModuleLoader__.load({
      * `localStorage['dsh-thinking-highlight.state.probe']`.
      */
     function reportProbe(handle) {
-      const rows = []
+      /* Not `rows`: that name is the module's per-row WeakMap, and shadowing it here
+         made every probe pass throw before it could write anything. */
+      const report = []
       for (const root of liveRoots()) {
         const entry = rows.get(root)
         const header = headerRowOf(root)
-        rows.push({
+        report.push({
           count: entry?.count ?? 0,
           highlighted: entry?.highlighted ?? true,
           badges: root.querySelector('[' + MARK + '="badges"]') !== null,
@@ -2374,7 +2376,7 @@ window.__ModuleLoader__.load({
              * the console that would say so is the one thing a report cannot carry.
              */
             errors: handle.probeErrors ?? [],
-            rows,
+            rows: report,
           }),
         )
       } catch (error) {

@@ -1374,6 +1374,38 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
   }
 }
 
+/*
+ * 23. The probe actually writes. `diagnose()` returning a tidy object proves nothing:
+ * the write happens inside a later pass, and `reportProbe` swallows its own exceptions
+ * so that diagnostics can never be the failure — which is exactly how a `rows.get is not
+ * a function` TypeError (a local `rows` array shadowing the module's WeakMap) shipped
+ * with a green suite. Assert on the stored document instead of on the call.
+ */
+{
+  try {
+    const probe = () => globalThis.window.localStorage.getItem('dsh-thinking-highlight.state.probe')
+    check('nothing is written while the probe is off', probe() === null, String(probe()))
+    const diagnose = runtime0()?.diagnose
+    if (typeof diagnose === 'function') {
+      diagnose(true)
+      runtime0().pass()
+      const raw = probe()
+      check('a pass with the probe on writes the key', raw !== null, String(raw))
+      if (raw !== null) {
+        const doc = JSON.parse(raw)
+        check('the probe names the running version', doc.version === runtime0().version, String(doc.version))
+        check('it carries the effective settings', typeof doc.state === 'object' && doc.state !== null && Array.isArray(doc.state.rows), JSON.stringify(doc.state === null ? null : Object.keys(doc.state ?? {})))
+        check('it carries what the last pass found', typeof doc.lastPass === 'object' && doc.lastPass !== null && typeof doc.lastPass.rows === 'number' && doc.lastPass.rows === runtime0().rows().length, JSON.stringify(doc.lastPass))
+        check('it lists one entry per row it can see', Array.isArray(doc.rows) && doc.rows.length === runtime0().rows().length, JSON.stringify(doc.rows))
+        check('its first row entry describes a row', typeof doc.rows?.[0]?.count === 'number' && typeof doc.rows?.[0]?.badges === 'boolean', JSON.stringify(doc.rows?.[0]))
+        check('it carries an error list, empty on a healthy page', Array.isArray(doc.errors), JSON.stringify(doc.errors))
+      }
+    }
+  } catch (error) {
+    check('the probe write checks run', false, String(error && error.stack ? error.stack : error))
+  }
+}
+
 let failed = 0
 for (const result of results) {
   if (!result.pass) failed += 1
