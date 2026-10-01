@@ -1,5 +1,5 @@
 /**
- * Self-test for @Yokira404/dsh-thinking-highlight's client half.
+ * Self-test for @yokira404/dsh-thinking-highlight's client half.
  *
  * The risky half of the plugin is DOM surgery on nodes React owns, so this test
  * extracts the shipped functions out of client.js by brace matching (never a

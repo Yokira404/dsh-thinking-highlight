@@ -1,5 +1,5 @@
 /**
- * Client half of @Yokira404/dsh-thinking-highlight.
+ * Client half of @yokira404/dsh-thinking-highlight.
  *
  * Two contributions, both registered inside `apply` so unloading the plugin
  * removes them:
@@ -20,7 +20,7 @@
  *     meets a foreign child element.
  */
 window.__ModuleLoader__.load({
-  id: '@Yokira404/dsh-thinking-highlight',
+  id: '@yokira404/dsh-thinking-highlight',
   factory(require) {
     const React = require('react')
     const ReactDOMClient = require('react-dom/client')

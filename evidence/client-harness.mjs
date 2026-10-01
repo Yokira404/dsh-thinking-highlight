@@ -429,7 +429,7 @@ const check = (name, pass, detail) => results.push({ name, pass: Boolean(pass), 
 // 1. The bundle registers exactly one factory under the plugin's own id.
 new Function('window', bundle)(globalThis.window)
 check('bundle registers a factory', pending !== null && typeof pending.factory === 'function', pending === null ? 'no registration' : String(pending.id))
-check('registration id is the package name', pending?.id === '@Yokira404/dsh-thinking-highlight', String(pending?.id))
+check('registration id is the package name', pending?.id === '@yokira404/dsh-thinking-highlight', String(pending?.id))
 
 /*
  * Negative control: the stub must reject a registration that omits the target

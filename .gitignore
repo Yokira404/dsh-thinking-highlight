@@ -20,6 +20,9 @@ Thumbs.db
 *.orig
 *.rej
 
+# Publish credentials: npm reads a token from a local .npmrc, which must never be committed
+.npmrc
+
 # Authoring-workspace scratch that must never travel with the package
 _lab/
 _tools/

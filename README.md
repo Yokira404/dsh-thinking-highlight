@@ -31,10 +31,10 @@ Works on both surfaces — the DSH web UI (`dsh web`) and the desktop app. Pick 
 
 ```bash
 # dsh web, from npm (installs straight into the `web` profile)
-dsh plugin --profile web add @Yokira404/dsh-thinking-highlight
+dsh plugin --profile web add @yokira404/dsh-thinking-highlight
 
 # any other profile name
-dsh plugin --profile desktop add @Yokira404/dsh-thinking-highlight
+dsh plugin --profile desktop add @yokira404/dsh-thinking-highlight
 ```
 
 Reload the page (or restart the app) and the settings page is there. In the
@@ -147,7 +147,7 @@ node evidence/client-harness.mjs   # 131 checks: the browser half really runs, a
 node evidence/css-check.mjs        #  26 checks: the stylesheet literal (braces, chip/row/panel rules)
 node evidence/locale-check.mjs     #   9 checks: package meta, both locale files and the version tag agree
 node evidence/host-shape.mjs       #  27 checks: the installed row markup, plus its markers in the app bundle
-node evidence/e2e-bundle.mjs <page-url-with-token> @Yokira404/dsh-thinking-highlight <cookie>
+node evidence/e2e-bundle.mjs <page-url-with-token> @yokira404/dsh-thinking-highlight <cookie>
 ```
 
 The self-tests extract the shipped functions out of `client.js` by brace matching and run them against a DOM
@@ -178,7 +178,7 @@ folded }`), `refresh()`, `clear()`, `pass()` and `passes()` for poking at the de
 ## Uninstall
 
 Use the card's **卸载 / Remove** in the Plugins page, or delete the `link:` dependency, the
-`node_modules/@Yokira404/dsh-thinking-highlight` junction and the `dsh.profile.bundles` entry by hand. Unloading
+`node_modules/@yokira404/dsh-thinking-highlight` junction and the `dsh.profile.bundles` entry by hand. Unloading
 removes every chip, puts the split text nodes back, drops the plugin's stylesheet and takes its `dsh-th-body`
 marker class off the host's elements.
 

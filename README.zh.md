@@ -24,10 +24,10 @@ DSH 插件：统计思考行（思维链）里关键词出现的次数并按词�
 
 ```bash
 # 网页版，从 npm 装（直接装进 web profile）
-dsh plugin --profile web add @Yokira404/dsh-thinking-highlight
+dsh plugin --profile web add @yokira404/dsh-thinking-highlight
 
 # 其它 profile 名
-dsh plugin --profile desktop add @Yokira404/dsh-thinking-highlight
+dsh plugin --profile desktop add @yokira404/dsh-thinking-highlight
 ```
 
 刷新页面（桌面端重启应用）就能在设置里看到。装了 [dsh-market](https://github.com/dsh-market/dsh-market)
@@ -125,7 +125,7 @@ node evidence/client-harness.mjs   # 131 项：浏览器半边在桩宿主里真
 node evidence/css-check.mjs        #  26 项：样式表字面量（括号、徽章/行/面板规则）
 node evidence/locale-check.mjs     #   9 项：包 meta、两个语言文件与版本号互相对得上
 node evidence/host-shape.mjs       #  27 项：安装版的真实行结构与正文字号区间，以及它在应用 bundle 里的标记
-node evidence/e2e-bundle.mjs <带 token 的页面地址> @Yokira404/dsh-thinking-highlight <cookie>
+node evidence/e2e-bundle.mjs <带 token 的页面地址> @yokira404/dsh-thinking-highlight <cookie>
 ```
 
 自检用大括号配对从 `client.js` 里**抽出真正在跑的函数**（不是副本）跑在 DOM 桩上；harness 则真的执行
@@ -154,7 +154,7 @@ folded }`）、`refresh()`、`clear()`、`pass()`、`passes()`。
 
 ## 卸载
 
-插件页卡片上的**卸载**，或手动删掉 `link:` 依赖、`node_modules/@Yokira404/dsh-thinking-highlight` junction
+插件页卡片上的**卸载**，或手动删掉 `link:` 依赖、`node_modules/@yokira404/dsh-thinking-highlight` junction
 与 `dsh.profile.bundles` 里的条目。卸载会移除全部徽章、还原被切分的文本节点、撤掉插件样式，并把
 `dsh-th-body` 这个标记 class 从宿主元素上摘掉。
 

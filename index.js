@@ -1,5 +1,5 @@
 /**
- * Host half of @Yokira404/dsh-thinking-highlight.
+ * Host half of @yokira404/dsh-thinking-highlight.
  *
  * The rendering, the keyword engine, and the preferences all live in the Client
  * half (./client.js): they are browser presentation state, stored in the
