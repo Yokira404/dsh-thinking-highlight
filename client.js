@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.2.1'
+    const VERSION = '1.3.0'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'

@@ -20,7 +20,20 @@ DSH 插件：统计思考行（思维链）里关键词出现的次数并按词�
 
 ## 安装
 
-需要 DSH 桌面端（开发与验证基于 `@deepseek-ai/dsh-desktop` 0.2.0-rc.2）。
+网页版（`dsh web`）和桌面端都能装。按你的用法挑一条：
+
+```bash
+# 网页版，从 npm 装（直接装进 web profile）
+dsh plugin --profile web add @Yokira404/dsh-thinking-highlight
+
+# 其它 profile 名
+dsh plugin --profile desktop add @Yokira404/dsh-thinking-highlight
+```
+
+刷新页面（桌面端重启应用）就能在设置里看到。装了 [dsh-market](https://github.com/dsh-market/dsh-market)
+的话，就是市场里那张卡片，点一下装好。
+
+用源码检出安装（不打 npm）：
 
 ```bash
 git clone https://github.com/Yokira404/dsh-thinking-highlight.git
@@ -32,10 +45,19 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 并在 `<profile>/node_modules` 下建一个 junction。之后**重启应用**：侧边栏「插件 → 已安装」里会出现卡片，
 卡片右侧的开关即整体启停。
 
-也可以用插件页自带的「添加插件」填本目录路径，效果相同（它还会顺带跑一次 pnpm 刷新 lockfile）。
+`dsh plugin add` 自己就会做前两步——本地目录、tarball、npm 包名都一样。
 
 > 依赖那一条不能省：插件页只列 profile 记成**依赖**（或随安装提供的官方可选包）的组合包。只写进
 > `dsh.profile.bundles` 的包照常加载，但不会出现卡片，也就没有开关。
+
+### 环境要求
+
+- 有 `web` profile 的 `dsh`（`dsh web` 0.1.0-rc.6 以上，这也是 dsh-market 自己的门槛）。
+- 不需要装任何宿主包：插件只 import `react` 和 `react-dom/client`，这两个由宿主的浏览器半边提供。
+  它没有声明 `@deepseek-ai/*` 依赖，也没有 `engines` 区间，所以不限制你跑哪个版本的 harness。
+- 它装饰的思考行（`[data-variant="think"]`）在 dsh desktop 0.2.0-rc.2 和 `dsh web` 自带的
+  `@deepseek-ai/dsh-client-ui-chat` 里都存在；`evidence/host-shape.mjs` 会断言它依赖的那几个标记
+  仍在安装版的 bundle 里。
 
 ## 设置
 

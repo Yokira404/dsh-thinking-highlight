@@ -27,7 +27,20 @@ section in Settings.
 
 ## Install
 
-Requires the DSH desktop app (built and tested against `@deepseek-ai/dsh-desktop` 0.2.0-rc.2).
+Works on both surfaces — the DSH web UI (`dsh web`) and the desktop app. Pick whichever line matches how you run DSH:
+
+```bash
+# dsh web, from npm (installs straight into the `web` profile)
+dsh plugin --profile web add @Yokira404/dsh-thinking-highlight
+
+# any other profile name
+dsh plugin --profile desktop add @Yokira404/dsh-thinking-highlight
+```
+
+Reload the page (or restart the app) and the settings page is there. In the
+[dsh-market](https://github.com/dsh-market/dsh-market) plugin it is the same one-click card.
+
+From a checkout, instead of npm:
 
 ```bash
 git clone https://github.com/Yokira404/dsh-thinking-highlight.git
@@ -35,16 +48,25 @@ cd dsh-thinking-highlight
 node evidence/install.mjs desktop        # or another profile name
 ```
 
-The installer records a `link:` dependency pointing at the checkout, adds the package to
+That installer records a `link:` dependency pointing at the checkout, adds the package to
 `dsh.profile.bundles`, and creates a junction under `<profile>/node_modules`. Then **restart the app**: the card
 appears in **Plugins → 已安装**, where the switch enables or disables it.
 
-You can also add the folder through the Plugins page's own "add plugin" action, which does the same thing
-through pnpm.
+`dsh plugin add` does the first two of those itself, for a local folder, a tarball or an npm name alike.
 
 > The dependency entry is not optional: the Plugins page only lists a package the profile records as a
 > *dependency* (or as a shipped-optional bundle). A package that is merely selected in `dsh.profile.bundles`
 > loads fine but gets no card — and therefore no switch.
+
+### Requirements
+
+- `dsh` with a `web` profile (`dsh web` 0.1.0-rc.6 or newer is what dsh-market itself needs).
+- No host packages to install: the plugin imports only `react` and `react-dom/client`, which the host already
+  serves to browser halves. It declares no `@deepseek-ai/*` dependency and no `engines` range, so it does not
+  constrain which harness build you run.
+- The reasoning row it decorates (`[data-variant="think"]`) exists in dsh desktop 0.2.0-rc.2 and in the
+  `@deepseek-ai/dsh-client-ui-chat` shipped with `dsh web`; `evidence/host-shape.mjs` asserts the markers it
+  depends on are still in the installed bundle.
 
 ## Settings
 
