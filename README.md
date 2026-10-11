@@ -83,17 +83,18 @@ appears in **Plugins → 已安装**, where the switch enables or disables it.
 | Case sensitive | Off (default): `is` also matches `IS` |
 | Keywords | One row per word: text field, `▸ style`, `完整词 / whole word`, suppress, delete |
 | ▸ style panel | Tint colour, text colour (**Theme** hands it back to the host), text size (10–22 px stepper), font, **B**old, **I**talic, **U**nderline, and **Badge settings** for that word's chip |
-| All badges (in the keyword heading) | Opens the badge editor for the shared chip look every word follows by default |
+| Badge settings (in the keyword heading) | The same words as the button inside a word's panel, but this one opens the *shared* chip look every word follows by default |
 
 Settings live in the browser's `localStorage` and apply immediately.
 
 ### Badge settings
 
 The chips that carry each word's count are editable on their own: **徽章设置 / Badge settings** at the end of a
-word's `▸ style` panel opens the editor for that word's chip, and the button in the keyword heading opens the
-same editor for the *shared* badge every word follows. A word leaves the shared look only once something in its
-own editor is changed — until then its row says **跟随全局 / Follows the shared badge**, and the shared badge is
-what its chips are drawn from.
+word's `▸ style` panel opens the editor for that word's chip, and the button of the same name in the keyword
+heading opens the same editor for the *shared* badge every word follows — its tooltip says so, and the dialog's
+own header names what it is editing. A word leaves the shared look only once something in its own editor is
+changed — until then its dialog says **跟随全局 / Follows the shared badge**, and the shared badge is what its
+chips are drawn from.
 
 The dialog is the host's own modal (full-viewport layer, masked backdrop, card on the secondary layer), and it
 edits as you go — there is no draft to lose:

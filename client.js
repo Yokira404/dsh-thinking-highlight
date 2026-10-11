@@ -3566,7 +3566,10 @@ window.__ModuleLoader__.load({
             ),
             /*
              * The shared badge, from the one place that speaks for the whole list. Each
-             * keyword's own editor starts from it, so it is also what "follow" means.
+             * keyword's own editor starts from it, so it is also what "follow" means —
+             * and it is the same words on the button as the one in a keyword's panel,
+             * because it opens the same dialog. What tells the two apart is the tooltip
+             * and the accessible name, which say whose badge the dialog will edit.
              */
             React.createElement(
               'button',
@@ -3580,7 +3583,7 @@ window.__ModuleLoader__.load({
                 title: labels.badgeSharedHint,
                 onClick: () => setBadgeTarget({ kind: 'shared' }),
               },
-              labels.badgeShared,
+              labels.badgeSettings,
             ),
           ),
           React.createElement(
