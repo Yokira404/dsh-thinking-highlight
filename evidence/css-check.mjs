@@ -63,17 +63,25 @@ check(
   'present',
 )
 /*
- * The dialog's rows follow the settings page's own shape — one control per row, a label
- * column of a fixed width so the controls line up whatever the label says, and the host's
- * hairline under the row. Without the fixed width the label column is as wide as its own
- * text and every control below starts at a different x.
+ * The dialog's rows follow the settings page's own shape — one control per row, the label
+ * in a fixed-width column on the left, the controls against the right edge, and the host's
+ * hairline under the row — and its three segmented rows are one shared size, because three
+ * groups each as wide as its own longest word is what the fixed column was meant to stop.
  */
 check(
   'the badge editor lays its controls out as settings rows',
   /\.dsh-th-brow\{[^}]*border-bottom:\.5px solid var\(--dsw-alias-border-l2\)/.test(css) &&
     /\.dsh-th-brow\{[^}]*align-items:flex-start/.test(css) &&
     /\.dsh-th-browLabel\{[^}]*width:64px/.test(css) &&
+    /\.dsh-th-browBody\{[^}]*justify-content:flex-end/.test(css) &&
     /\.dsh-th-browBody\{[^}]*flex:auto/.test(css),
+  'present',
+)
+check(
+  'the segmented rows are one size and give every segment one track',
+  /\.dsh-th-browBody>\.dsh-th-seg\{[^}]*display:inline-grid/.test(css) &&
+    /\.dsh-th-browBody>\.dsh-th-seg\{[^}]*grid-auto-columns:1fr/.test(css) &&
+    /\.dsh-th-browBody>\.dsh-th-seg\{[^}]*min-width:240px/.test(css),
   'present',
 )
 check(

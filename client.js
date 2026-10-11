@@ -1022,18 +1022,26 @@ window.__ModuleLoader__.load({
 /* The dialog's own state line leads the footer; the two actions answer it on the right. */
 .dsh-th-dialogFoot .dsh-th-panelLabel{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /*
- * One row of the badge editor, in the settings page's own shape: a label column of a fixed
- * width — so every control in the dialog starts at the same x, whatever the label says —
- * the controls beside it, and the hairline the host draws under its own settings rows.
- * Thirteen controls in one column need that rhythm, and the hairline is what turns a stack
- * of widgets into a list of settings.
+ * One row of the badge editor, in the settings page's own shape: the label in a column of
+ * a fixed width on the left, the controls pushed to the right edge — so every control in
+ * the dialog ends at the same x, and a row reads as "this setting, that value" — and the
+ * hairline the host draws under its own settings rows. Thirteen controls in one column
+ * need that rhythm to be readable at all.
  */
 .dsh-th-brow{display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
 .dsh-th-brow:last-child{border-bottom:0}
 .dsh-th-browLabel{flex:none;width:64px;padding-top:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;word-break:break-word}
-.dsh-th-browBody{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;flex:auto}
+.dsh-th-browBody{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;min-width:0;flex:auto}
 /* A note under a row's controls takes a line of its own rather than squeezing beside them. */
 .dsh-th-browBody>.dsh-th-fieldNote{flex-basis:100%;margin:0}
+/*
+ * The three segmented rows are the same size as each other: a grid gives every segment the
+ * same track (so the bubbles inside a group match too), and the shared minimum width is
+ * what makes 形状, 描边 and 阴影 come out at one size instead of three, each as wide as its
+ * own longest word. The settings page's language control keeps its inline sizing.
+ */
+.dsh-th-browBody>.dsh-th-seg{flex:none;display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;min-width:240px}
+.dsh-th-browBody>.dsh-th-seg .dsh-th-seg-item{padding:5px 10px;white-space:nowrap}
 /* The preview is the transcript's own line, drawn with the transcript's own parts:
    a title, the separator dot, then the chips and the folded preview text after them. */
 .dsh-th-preview{display:flex;align-items:center;gap:8px;flex:auto;padding:12px;border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-markdown-code-block,var(--dsw-alias-interactive-bg-hover))}
