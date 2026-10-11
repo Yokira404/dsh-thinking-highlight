@@ -1609,7 +1609,27 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
       storedState().badgeTemplates?.[0]?.name === '我的' && storedState().badgeTemplates?.[0]?.spec?.ink === '#123456',
       JSON.stringify(storedState().badgeTemplates),
     )
-    check('and it is offered beside the built-in ones', markers().includes('badge-tpl-saved'), JSON.stringify(markers().filter((name) => name.startsWith('badge-tpl'))))
+    /*
+     * The saved ones are a dropdown, not a row of chips: a reader with twelve of them
+     * would otherwise be looking at a row that overflows the dialog. What the checks can
+     * hold is that the list is inside that control, that picking an entry is what applies
+     * it, and that the delete button only ever means the one that is picked.
+     */
+    const picker = marker('badge-tpl-pick')
+    const options = (picker?.children ?? []).flatMap((child) => (Array.isArray(child) ? child : [child]))
+    check(
+      'the saved templates live in a dropdown, shown and armed once saved',
+      picker !== undefined &&
+        picker.props.disabled !== true &&
+        picker.props.value === storedState().badgeTemplates[0].id &&
+        options.some((option) => option?.props?.value === storedState().badgeTemplates[0].id && String(option?.children?.[0] ?? '') === '我的') &&
+        marker('badge-tpl-delete')?.props?.disabled === false,
+      JSON.stringify([options.map((option) => [option?.props?.value, option?.children?.[0]]), picker?.props?.value]),
+    )
+    picker.props.onChange({ target: { value: storedState().badgeTemplates[0].id } })
+    runTimers()
+    check('picking a saved template puts its look on the badge', storedState().rows?.[0]?.badge?.ink === '#123456', JSON.stringify(storedState().rows?.[0]?.badge))
+    check('and the delete button now names what it would delete', marker('badge-tpl-delete')?.props?.disabled === false, JSON.stringify(marker('badge-tpl-delete')?.props?.disabled))
     clickSettings('badge-tpl-delete')
     check('deleting it removes it from the store', (storedState().badgeTemplates ?? []).length === 0, JSON.stringify(storedState().badgeTemplates))
 

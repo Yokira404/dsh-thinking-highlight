@@ -640,8 +640,11 @@ window.__ModuleLoader__.load({
         badgePreviewNote: '放大后行高会自动让位，徽章不会被裁掉',
         badgePreviewText: '折叠行后面的预览文字',
         badgeTemplates: '模板',
+        badgeTemplatesMine: '我的模板',
         badgeSaveTemplate: '存为模板',
         badgeTemplateName: '模板名字',
+        badgeTemplatePick: '选择模板…',
+        badgeTemplateNone: '还没有保存的模板',
         badgeSave: '保存',
         badgeCancel: '取消',
         badgeDeleteTemplate: '删除模板',
@@ -757,8 +760,11 @@ window.__ModuleLoader__.load({
         badgePreviewNote: 'The row makes room for it, so a larger badge is never clipped',
         badgePreviewText: 'the folded preview follows the chips',
         badgeTemplates: 'Templates',
+        badgeTemplatesMine: 'My templates',
         badgeSaveTemplate: 'Save as template',
         badgeTemplateName: 'Template name',
+        badgeTemplatePick: 'Pick a template…',
+        badgeTemplateNone: 'No saved templates yet',
         badgeSave: 'Save',
         badgeCancel: 'Cancel',
         badgeDeleteTemplate: 'Delete template',
@@ -1058,13 +1064,12 @@ window.__ModuleLoader__.load({
 .dsh-th-btn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 /* A template is a look you can put on in one click: the presets, then your own. */
 .dsh-th-tpls{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.dsh-th-tplWrap{display:inline-flex;align-items:center;gap:2px;padding-right:4px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover))}
-.dsh-th-tplWrap .dsh-th-tpl{background:transparent}
+/* The saved ones are a list that grows, so they live in a dropdown — and it takes the
+   width its names need up to a point, rather than pushing the row out of the dialog. */
+.dsh-th-browBody>.dsh-th-select{min-width:150px;max-width:250px}
 .dsh-th-tpl{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 10px;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
 .dsh-th-tpl:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
 .dsh-th-tpl:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
-.dsh-th-tplX{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:-2px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1;cursor:pointer}
-.dsh-th-tplX:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary)}
 .dsh-th-name{height:30px;min-width:8em;padding:0 10px;border:.5px solid transparent;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;outline:none}
 .dsh-th-name:focus{border-color:var(--dsw-alias-state-business-primary)}
 /* The texture: a thumbnail of what is uploaded, how it is laid in, and how strongly. */
@@ -2815,6 +2820,12 @@ window.__ModuleLoader__.load({
       const [naming, setNaming] = React.useState(false)
       const [name, setName] = React.useState('')
       const [note, setNote] = React.useState('')
+      /*
+       * Which saved template the dropdown is showing. Kept here rather than in the store:
+       * it is a view of the list, not a setting — and it is also what the delete button
+       * acts on, so that one template is the only thing either control can mean.
+       */
+      const [picked, setPicked] = React.useState('')
       /* Escape closes it, like every other dialog on this shell. */
       React.useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
@@ -2971,11 +2982,19 @@ window.__ModuleLoader__.load({
           setNote(labels.badgeTextureFailed)
         }
       }
+      /*
+       * Saving hands back the new template's id — the dropdown then shows what was just
+       * saved, so the row answers "did that work?" without a word of its own — or a
+       * message when the name was empty or the list is full.
+       */
       const save = () => {
-        const message = props.onSaveTemplate(name)
-        if (typeof message === 'string' && message !== '') {
-          setNote(message)
-          return
+        const result = props.onSaveTemplate(name)
+        if (result !== null && typeof result === 'object') {
+          if (typeof result.error === 'string' && result.error !== '') {
+            setNote(result.error)
+            return
+          }
+          if (typeof result.id === 'string') setPicked(result.id)
         }
         setNaming(false)
         setName('')
@@ -3017,6 +3036,12 @@ window.__ModuleLoader__.load({
         ),
         el('p', { className: 'dsh-th-fieldNote' }, labels.badgePreviewNote),
       )
+      /*
+       * The presets are a fixed six and stay visible: one click each, and there is nothing
+       * to search. The reader's own templates are a list that grows, so they live in a
+       * dropdown instead — twelve saved looks as twelve buttons was a row that overflowed
+       * the dialog, and a dropdown is the one control that holds any number of them.
+       */
       const templates = row(
         labels.badgeTemplates,
         el(
@@ -3036,85 +3061,98 @@ window.__ModuleLoader__.load({
               labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
             ),
           ),
-          props.templates.map((template) =>
-            el(
-              'span',
-              { key: template.id, className: 'dsh-th-tplWrap' },
-              el(
+          naming === true
+            ? [
+                el('input', {
+                  key: 'name',
+                  className: 'dsh-th-name',
+                  type: 'text',
+                  value: name,
+                  placeholder: labels.badgeTemplateName,
+                  'aria-label': labels.badgeTemplateName,
+                  'data-dsh-th': 'badge-template-name',
+                  spellCheck: false,
+                  onChange: (event) => setName(event.target.value),
+                  onKeyDown: (event) => {
+                    if (event.key === 'Enter') save()
+                  },
+                }),
+                el(
+                  'button',
+                  { key: 'save', type: 'button', className: 'dsh-th-btn', 'data-primary': '1', 'data-dsh-th': 'badge-template-save', onClick: save },
+                  labels.badgeSave,
+                ),
+                el(
+                  'button',
+                  {
+                    key: 'cancel',
+                    type: 'button',
+                    className: 'dsh-th-btn',
+                    'data-dsh-th': 'badge-template-cancel',
+                    onClick: () => {
+                      setNaming(false)
+                      setNote('')
+                    },
+                  },
+                  labels.badgeCancel,
+                ),
+              ]
+            : el(
                 'button',
                 {
-                  type: 'button',
-                  className: 'dsh-th-tpl',
-                  'data-dsh-th': 'badge-tpl-saved',
-                  title: template.name,
-                  onClick: () => props.onApply(template.spec),
-                },
-                template.name,
-              ),
-              el(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dsh-th-tplX',
-                  'data-dsh-th': 'badge-tpl-delete',
-                  'aria-label': labels.badgeDeleteTemplate,
-                  title: labels.badgeDeleteTemplate,
-                  onClick: () => props.onDeleteTemplate(template.id),
-                },
-                '×',
-              ),
-            ),
-          ),
-        ),
-        naming === true
-          ? [
-              el('input', {
-                key: 'name',
-                className: 'dsh-th-name',
-                type: 'text',
-                value: name,
-                placeholder: labels.badgeTemplateName,
-                'aria-label': labels.badgeTemplateName,
-                'data-dsh-th': 'badge-template-name',
-                spellCheck: false,
-                onChange: (event) => setName(event.target.value),
-                onKeyDown: (event) => {
-                  if (event.key === 'Enter') save()
-                },
-              }),
-              el(
-                'button',
-                { key: 'save', type: 'button', className: 'dsh-th-btn', 'data-primary': '1', 'data-dsh-th': 'badge-template-save', onClick: save },
-                labels.badgeSave,
-              ),
-              el(
-                'button',
-                {
-                  key: 'cancel',
                   type: 'button',
                   className: 'dsh-th-btn',
-                  'data-dsh-th': 'badge-template-cancel',
-                  onClick: () => {
-                    setNaming(false)
-                    setNote('')
-                  },
+                  'data-outline': '1',
+                  'data-dsh-th': 'badge-template-new',
+                  disabled: props.templates.length >= TEMPLATE_MAX,
+                  title: props.templates.length >= TEMPLATE_MAX ? labels.badgeTemplatesFull : labels.badgeSaveTemplate,
+                  onClick: () => setNaming(true),
                 },
-                labels.badgeCancel,
+                labels.badgeSaveTemplate,
               ),
-            ]
-          : el(
-              'button',
-              {
-                type: 'button',
-                className: 'dsh-th-btn',
-                'data-outline': '1',
-                'data-dsh-th': 'badge-template-new',
-                disabled: props.templates.length >= TEMPLATE_MAX,
-                title: props.templates.length >= TEMPLATE_MAX ? labels.badgeTemplatesFull : labels.badgeSaveTemplate,
-                onClick: () => setNaming(true),
-              },
-              labels.badgeSaveTemplate,
-            ),
+        ),
+      )
+      /* The saved ones: pick one to put it on, delete the one that is picked. */
+      const saved = props.templates.some((template) => template.id === picked) ? picked : ''
+      const ownTemplates = row(
+        labels.badgeTemplatesMine,
+        el(
+          'select',
+          {
+            className: 'dsh-th-select',
+            'data-dsh-th': 'badge-tpl-pick',
+            value: saved,
+            disabled: props.templates.length === 0,
+            'aria-label': labels.badgeTemplatesMine,
+            onChange: (event) => {
+              const id = event.target.value
+              setPicked(id)
+              const template = props.templates.find((item) => item.id === id)
+              if (template !== undefined) props.onApply(template.spec)
+            },
+          },
+          [
+            el('option', { key: '__none', value: '' }, props.templates.length === 0 ? labels.badgeTemplateNone : labels.badgeTemplatePick),
+            ...props.templates.map((template) => el('option', { key: template.id, value: template.id }, template.name)),
+          ],
+        ),
+        el(
+          'button',
+          {
+            type: 'button',
+            className: 'dsh-th-btn',
+            'data-outline': '1',
+            'data-dsh-th': 'badge-tpl-delete',
+            disabled: saved === '',
+            'aria-label': labels.badgeDeleteTemplate,
+            title: labels.badgeDeleteTemplate,
+            onClick: () => {
+              props.onDeleteTemplate(saved)
+              setPicked('')
+            },
+          },
+          labels.badgeDeleteTemplate,
+        ),
       )
       const size = row(
         labels.badgeSize,
@@ -3369,6 +3407,7 @@ window.__ModuleLoader__.load({
             { className: 'dsh-th-dialogBody' },
             preview,
             templates,
+            ownTemplates,
             size,
             bgRow,
             inkRow,
@@ -3469,16 +3508,12 @@ window.__ModuleLoader__.load({
         }
         const badgeSaveTemplate = (value) => {
           const name = typeof value === 'string' ? value.trim() : ''
-          if (name === '') return labels.badgeTemplateName
-          if (settings.badgeTemplates.length >= TEMPLATE_MAX) return labels.badgeTemplatesFull
-          patch({
-            badgeTemplates: settings.badgeTemplates.concat({
-              id: 'tpl' + Date.now().toString(36),
-              name: name.slice(0, 24),
-              spec: badgeSpec,
-            }),
-          })
-          return ''
+          if (name === '') return { error: labels.badgeTemplateName }
+          if (settings.badgeTemplates.length >= TEMPLATE_MAX) return { error: labels.badgeTemplatesFull }
+          const template = { id: 'tpl' + Date.now().toString(36), name: name.slice(0, 24), spec: badgeSpec }
+          patch({ badgeTemplates: settings.badgeTemplates.concat(template) })
+          /* The id comes back so the editor's dropdown can show what was just saved. */
+          return { id: template.id }
         }
         const badgeSample = {
           text: badgeRow !== undefined && badgeRow.text.trim() !== '' ? badgeRow.text.trim() : labels.keywordPlaceholder,

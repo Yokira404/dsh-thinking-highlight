@@ -102,7 +102,7 @@ edits as you go — there is no draft to lose:
 | Part | What it does |
 |---|---|
 | Preview | The row the chip will sit on, drawn with the transcript's own chip builder, so what is previewed is what the row will draw |
-| Templates | Six built-in looks (Default, Emphasis, Pill, Outline, Square, Glow) applied in one click, plus **Save as template** for your own — up to 12, each deletable |
+| Templates | Six built-in looks (Default, Emphasis, Pill, Outline, Square, Glow) applied in one click, and **Save as template** for your own. Your templates are a list that grows, so they live in the **My templates** dropdown instead of a row of chips — pick one to put it on, and the button beside it deletes the one that is picked |
 | Size | 0.5×–2.4×, by stepper or slider, with **Follow the word's size** on by default so the chip still tracks that word's text size. A chip taller than the line it sits on makes its row grow instead of being clipped |
 | Colour | Fill, text and frame, each with a colour well and a way back to the theme — the frame can also keep borrowing the word's own colour |
 | Style | Shape (rounded / pill / square), stroke (thin / thick / none), shadow (none / soft / glow) and bold |
