@@ -62,6 +62,20 @@ check(
   /\.dsh-th-badgeopen\{/.test(css) && /\.dsh-th-badgeopen\[data-placement="page"\]\{/.test(css),
   'present',
 )
+/*
+ * The dialog's rows follow the settings page's own shape — one control per row, a label
+ * column of a fixed width so the controls line up whatever the label says, and the host's
+ * hairline under the row. Without the fixed width the label column is as wide as its own
+ * text and every control below starts at a different x.
+ */
+check(
+  'the badge editor lays its controls out as settings rows',
+  /\.dsh-th-brow\{[^}]*border-bottom:\.5px solid var\(--dsw-alias-border-l2\)/.test(css) &&
+    /\.dsh-th-brow\{[^}]*align-items:flex-start/.test(css) &&
+    /\.dsh-th-browLabel\{[^}]*width:64px/.test(css) &&
+    /\.dsh-th-browBody\{[^}]*flex:auto/.test(css),
+  'present',
+)
 check(
   'a shadow is a named mode, so a chip can glow in its own colour',
   /\.dsh-th-badge\[data-shadow="soft"\]\{/.test(css) && /\.dsh-th-badge\[data-shadow="glow"\]\{[^}]*var\(--dsh-th-frame/.test(css),

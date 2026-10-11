@@ -657,14 +657,12 @@ window.__ModuleLoader__.load({
         badgeSizeDown: '缩小一档',
         badgeFollowText: '跟随文字大小',
         badgeFollowTextHint: '关掉后徽章不再跟着这个词的字号变，只按上面的倍数画',
-        badgeColors: '颜色',
         badgeBg: '底色',
         badgeInk: '文字',
         badgeFrame: '边框色',
         badgeTheme: '主题',
         badgeKeyword: '词色',
         badgeNoFill: '透明',
-        badgeStyle: '样式',
         badgeShape: '形状',
         badgeShapeRounded: '圆角',
         badgeShapePill: '胶囊',
@@ -776,14 +774,12 @@ window.__ModuleLoader__.load({
         badgeSizeDown: 'One step smaller',
         badgeFollowText: 'Follow the word’s size',
         badgeFollowTextHint: 'Off, the badge stops following this word’s text size and draws at the factor alone',
-        badgeColors: 'Colour',
         badgeBg: 'Fill',
         badgeInk: 'Text',
         badgeFrame: 'Frame',
         badgeTheme: 'Theme',
         badgeKeyword: 'Word',
         badgeNoFill: 'None',
-        badgeStyle: 'Style',
         badgeShape: 'Shape',
         badgeShapeRounded: 'Rounded',
         badgeShapePill: 'Pill',
@@ -1021,21 +1017,30 @@ window.__ModuleLoader__.load({
 .dsh-th-dialogSubject{max-width:12em;padding:0 8px;border-radius:6px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-hover);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dsh-th-dialogClose{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:auto;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary);font-size:15px;line-height:1;cursor:pointer}
 .dsh-th-dialogClose:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.dsh-th-dialogBody{display:flex;flex-direction:column;gap:16px;min-height:0;overflow:auto;padding:0 24px}
+.dsh-th-dialogBody{display:flex;flex-direction:column;min-height:0;overflow:auto;padding:0 24px}
 .dsh-th-dialogFoot{display:flex;align-items:center;gap:8px;padding:18px 24px 0}
 /* The dialog's own state line leads the footer; the two actions answer it on the right. */
 .dsh-th-dialogFoot .dsh-th-panelLabel{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/*
+ * One row of the badge editor, in the settings page's own shape: a label column of a fixed
+ * width — so every control in the dialog starts at the same x, whatever the label says —
+ * the controls beside it, and the hairline the host draws under its own settings rows.
+ * Thirteen controls in one column need that rhythm, and the hairline is what turns a stack
+ * of widgets into a list of settings.
+ */
+.dsh-th-brow{display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.dsh-th-brow:last-child{border-bottom:0}
+.dsh-th-browLabel{flex:none;width:64px;padding-top:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;word-break:break-word}
+.dsh-th-browBody{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;flex:auto}
+/* A note under a row's controls takes a line of its own rather than squeezing beside them. */
+.dsh-th-browBody>.dsh-th-fieldNote{flex-basis:100%;margin:0}
 /* The preview is the transcript's own line, drawn with the transcript's own parts:
    a title, the separator dot, then the chips and the folded preview text after them. */
-.dsh-th-preview{display:flex;align-items:center;gap:8px;padding:12px;border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-markdown-code-block,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-preview{display:flex;align-items:center;gap:8px;flex:auto;padding:12px;border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-markdown-code-block,var(--dsw-alias-interactive-bg-hover))}
 .dsh-th-previewLine{display:flex;align-items:center;min-width:0;flex:auto}
 .dsh-th-previewTitle{flex:none;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary)}
 .dsh-th-previewDot{flex:none;width:2px;height:2px;margin:0 8px;border-radius:1px;background:var(--dsw-alias-label-caption)}
 .dsh-th-previewText{min-width:0;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dsh-th-field{display:flex;flex-direction:column;gap:8px}
-/* A field's own controls sit in lines; a lone button hugs its label instead of the width. */
-.dsh-th-field>.dsh-th-btn{align-self:flex-start}
-.dsh-th-fieldLine{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .dsh-th-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;cursor:pointer}
 .dsh-th-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-th-btn[data-primary]{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));color:var(--dsw-alias-label-primary-foreground)}
@@ -2840,74 +2845,78 @@ window.__ModuleLoader__.load({
         const match = quicks.find(([value]) => spec[field] === value)
         return match === undefined ? quicks[0][2] : match[2]
       }
-      const well = (field, label, quicks) =>
+      /*
+       * One row of this dialog, in the settings page's own shape: a label column of a
+       * fixed width — so every control in the dialog starts at the same x — the controls
+       * beside it, and the hairline the host draws under its own settings rows. Thirteen
+       * controls in one column need that rhythm to be readable at all.
+       */
+      const row = (label, ...controls) =>
         el(
           'div',
-          { className: 'dsh-th-fieldLine', key: field },
-          el('span', { className: 'dsh-th-panelLabel' }, label),
+          { className: 'dsh-th-brow' },
+          el('span', { className: 'dsh-th-browLabel' }, label),
+          el('div', { className: 'dsh-th-browBody' }, controls),
+        )
+      const well = (field, label, quicks) =>
+        el(
+          'label',
+          { className: 'dsh-th-color', key: field, title: label },
+          el('input', {
+            className: 'dsh-th-swatch',
+            type: 'color',
+            value: swatchOf(field),
+            'aria-label': label,
+            'data-dsh-th': 'badge-well-' + field,
+            onChange: (event) => patch({ [field]: hex(event.target.value) }),
+          }),
+          el('span', {
+            className: 'dsh-th-dot',
+            'data-dsh-th': 'badge-dot-' + field,
+            /*
+             * `currentColor` is the dialog's own text colour, which is the token this field
+             * falls back to — so the dot previews the theme choice itself. A field that asks
+             * for no fill shows the empty square its own hairline draws.
+             */
+            style: { backgroundColor: isOwn(field) ? spec[field] : spec[field] === 'none' ? 'transparent' : 'currentColor' },
+          }),
+          el('span', { className: 'dsh-th-hex' }, isOwn(field) ? String(spec[field]).toUpperCase() : namedChoice(field, quicks)),
+        )
+      const choices = (field, quicks) =>
+        quicks.map(([value, marker, text]) =>
           el(
-            'label',
-            { className: 'dsh-th-color', title: label },
-            el('input', {
-              className: 'dsh-th-swatch',
-              type: 'color',
-              value: swatchOf(field),
-              'aria-label': label,
-              'data-dsh-th': 'badge-well-' + field,
-              onChange: (event) => patch({ [field]: hex(event.target.value) }),
-            }),
-            el('span', {
-              className: 'dsh-th-dot',
-              'data-dsh-th': 'badge-dot-' + field,
-              /*
-               * `currentColor` is the panel's own text colour, which is the token this field
-               * falls back to — so the dot previews the theme choice itself. A field that
-               * asks for no fill shows the empty square its own hairline draws.
-               */
-              style: { backgroundColor: isOwn(field) ? spec[field] : spec[field] === 'none' ? 'transparent' : 'currentColor' },
-            }),
-            el('span', { className: 'dsh-th-hex' }, isOwn(field) ? String(spec[field]).toUpperCase() : namedChoice(field, quicks)),
-          ),
-          quicks.map(([value, marker, text]) =>
-            el(
-              'button',
-              {
-                key: marker,
-                type: 'button',
-                className: 'dsh-th-follow',
-                'data-dsh-th': 'badge-quick-' + marker,
-                'data-following': spec[field] === value ? '1' : undefined,
-                'aria-pressed': spec[field] === value ? 'true' : 'false',
-                'aria-label': text,
-                title: text,
-                onClick: () => patch({ [field]: value }),
-              },
-              text,
-            ),
+            'button',
+            {
+              key: marker,
+              type: 'button',
+              className: 'dsh-th-follow',
+              'data-dsh-th': 'badge-quick-' + marker,
+              'data-following': spec[field] === value ? '1' : undefined,
+              'aria-pressed': spec[field] === value ? 'true' : 'false',
+              'aria-label': text,
+              title: text,
+              onClick: () => patch({ [field]: value }),
+            },
+            text,
           ),
         )
       const segment = (label, entries, current, onPick, marker) =>
         el(
           'div',
-          { className: 'dsh-th-fieldLine' },
-          el('span', { className: 'dsh-th-panelLabel' }, label),
-          el(
-            'div',
-            { className: 'dsh-th-seg', role: 'group', 'aria-label': label },
-            entries.map(([id, text]) =>
-              el(
-                'button',
-                {
-                  key: id,
-                  type: 'button',
-                  className: 'dsh-th-seg-item',
-                  'data-dsh-th': marker + '-' + id,
-                  'data-on': current === id ? '1' : undefined,
-                  'aria-pressed': current === id ? 'true' : 'false',
-                  onClick: () => onPick(id),
-                },
-                text,
-              ),
+          { className: 'dsh-th-seg', role: 'group', 'aria-label': label },
+          entries.map(([id, text]) =>
+            el(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                className: 'dsh-th-seg-item',
+                'data-dsh-th': marker + '-' + id,
+                'data-on': current === id ? '1' : undefined,
+                'aria-pressed': current === id ? 'true' : 'false',
+                onClick: () => onPick(id),
+              },
+              text,
             ),
           ),
         )
@@ -2965,15 +2974,8 @@ window.__ModuleLoader__.load({
         setNote('')
       }
       /* The transcript's own chip, drawn by the transcript's own builder. */
-      const preview = el(
-        'div',
-        { className: 'dsh-th-field' },
-        el(
-          'div',
-          { className: 'dsh-th-fieldLine' },
-          el('span', { className: 'dsh-th-panelLabel' }, labels.badgePreview),
-          el('span', { className: 'dsh-th-fieldNote' }, labels.badgePreviewNote),
-        ),
+      const preview = row(
+        labels.badgePreview,
         el(
           'div',
           { className: 'dsh-th-preview', 'data-dsh-th': 'badge-preview' },
@@ -3005,67 +3007,61 @@ window.__ModuleLoader__.load({
             el('span', { className: 'dsh-th-previewText' }, sample.preview),
           ),
         ),
+        el('p', { className: 'dsh-th-fieldNote' }, labels.badgePreviewNote),
       )
-      const templates = el(
-        'div',
-        { className: 'dsh-th-field' },
+      const templates = row(
+        labels.badgeTemplates,
         el(
           'div',
-          { className: 'dsh-th-fieldLine' },
-          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeTemplates),
-          el(
-            'div',
-            { className: 'dsh-th-tpls' },
-            BADGE_PRESETS.map((preset) =>
+          { className: 'dsh-th-tpls' },
+          BADGE_PRESETS.map((preset) =>
+            el(
+              'button',
+              {
+                key: preset.id,
+                type: 'button',
+                className: 'dsh-th-tpl',
+                'data-dsh-th': 'badge-tpl-' + preset.id,
+                'aria-label': labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
+                onClick: () => props.onApply({ ...badgeDefaults(), ...preset.spec }),
+              },
+              labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
+            ),
+          ),
+          props.templates.map((template) =>
+            el(
+              'span',
+              { key: template.id, className: 'dsh-th-tplWrap' },
               el(
                 'button',
                 {
-                  key: preset.id,
                   type: 'button',
                   className: 'dsh-th-tpl',
-                  'data-dsh-th': 'badge-tpl-' + preset.id,
-                  'aria-label': labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
-                  onClick: () => props.onApply({ ...badgeDefaults(), ...preset.spec }),
+                  'data-dsh-th': 'badge-tpl-saved',
+                  title: template.name,
+                  onClick: () => props.onApply(template.spec),
                 },
-                labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
+                template.name,
               ),
-            ),
-            props.templates.map((template) =>
               el(
-                'span',
-                { key: template.id, className: 'dsh-th-tplWrap' },
-                el(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dsh-th-tpl',
-                    'data-dsh-th': 'badge-tpl-saved',
-                    title: template.name,
-                    onClick: () => props.onApply(template.spec),
-                  },
-                  template.name,
-                ),
-                el(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dsh-th-tplX',
-                    'data-dsh-th': 'badge-tpl-delete',
-                    'aria-label': labels.badgeDeleteTemplate,
-                    title: labels.badgeDeleteTemplate,
-                    onClick: () => props.onDeleteTemplate(template.id),
-                  },
-                  '×',
-                ),
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-th-tplX',
+                  'data-dsh-th': 'badge-tpl-delete',
+                  'aria-label': labels.badgeDeleteTemplate,
+                  title: labels.badgeDeleteTemplate,
+                  onClick: () => props.onDeleteTemplate(template.id),
+                },
+                '×',
               ),
             ),
           ),
         ),
         naming === true
-          ? el(
-              'div',
-              { className: 'dsh-th-fieldLine' },
+          ? [
               el('input', {
+                key: 'name',
                 className: 'dsh-th-name',
                 type: 'text',
                 value: name,
@@ -3080,12 +3076,13 @@ window.__ModuleLoader__.load({
               }),
               el(
                 'button',
-                { type: 'button', className: 'dsh-th-btn', 'data-primary': '1', 'data-dsh-th': 'badge-template-save', onClick: save },
+                { key: 'save', type: 'button', className: 'dsh-th-btn', 'data-primary': '1', 'data-dsh-th': 'badge-template-save', onClick: save },
                 labels.badgeSave,
               ),
               el(
                 'button',
                 {
+                  key: 'cancel',
                   type: 'button',
                   className: 'dsh-th-btn',
                   'data-dsh-th': 'badge-template-cancel',
@@ -3096,7 +3093,7 @@ window.__ModuleLoader__.load({
                 },
                 labels.badgeCancel,
               ),
-            )
+            ]
           : el(
               'button',
               {
@@ -3111,10 +3108,8 @@ window.__ModuleLoader__.load({
               labels.badgeSaveTemplate,
             ),
       )
-      const size = el(
-        'div',
-        { className: 'dsh-th-fieldLine' },
-        el('span', { className: 'dsh-th-panelLabel' }, labels.badgeSize),
+      const size = row(
+        labels.badgeSize,
         el(
           'div',
           { className: 'dsh-th-size', 'data-dsh-th': 'badge-size' },
@@ -3171,126 +3166,150 @@ window.__ModuleLoader__.load({
         }),
         el('span', { className: 'dsh-th-panelLabel' }, labels.badgeFollowText),
       )
-      const colors = el(
-        'div',
-        { className: 'dsh-th-field' },
-        el(
-          'div',
-          { className: 'dsh-th-fieldLine' },
-          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeColors),
-        ),
+      /*
+       * Three rows for the three colours, each keeping the way back to what the chip drew
+       * with before: the host's tokens, transparency, or — on the frame alone — the word's
+       * own colour.
+       */
+      const bgRow = row(
+        labels.badgeBg,
         well('bg', labels.badgeBg, [
           ['theme', 'bg-theme', labels.badgeTheme],
           ['none', 'bg-none', labels.badgeNoFill],
         ]),
+        choices('bg', [
+          ['theme', 'bg-theme', labels.badgeTheme],
+          ['none', 'bg-none', labels.badgeNoFill],
+        ]),
+      )
+      const inkRow = row(
+        labels.badgeInk,
         well('ink', labels.badgeInk, [['theme', 'ink-theme', labels.badgeTheme]]),
+        choices('ink', [['theme', 'ink-theme', labels.badgeTheme]]),
+      )
+      const frameRow = row(
+        labels.badgeFrame,
         well('frame', labels.badgeFrame, [
           ['keyword', 'frame-keyword', labels.badgeKeyword],
           ['theme', 'frame-theme', labels.badgeTheme],
         ]),
+        choices('frame', [
+          ['keyword', 'frame-keyword', labels.badgeKeyword],
+          ['theme', 'frame-theme', labels.badgeTheme],
+        ]),
       )
-      const styleRow =
-        el('div', { className: 'dsh-th-field' },
-          el('div', { className: 'dsh-th-fieldLine' }, el('span', { className: 'dsh-th-panelLabel' }, labels.badgeStyle)),
-          segment(
-            labels.badgeShape,
-            [
-              ['rounded', labels.badgeShapeRounded],
-              ['pill', labels.badgeShapePill],
-              ['square', labels.badgeShapeSquare],
-            ],
-            spec.shape,
-            (value) => patch({ shape: value }),
-            'badge-shape',
-          ),
-          segment(
-            labels.badgeStroke,
-            [
-              ['hairline', labels.badgeStrokeHairline],
-              ['solid', labels.badgeStrokeSolid],
-              ['none', labels.badgeNone],
-            ],
-            spec.border,
-            (value) => patch({ border: value }),
-            'badge-stroke',
-          ),
-          segment(
-            labels.badgeShadow,
-            [
-              ['none', labels.badgeNone],
-              ['soft', labels.badgeShadowSoft],
-              ['glow', labels.badgeShadowGlow],
-            ],
-            spec.shadow,
-            (value) => patch({ shadow: value }),
-            'badge-shadow',
-          ),
-          el('div', { className: 'dsh-th-fieldLine' },
-            el(Switch, {
-              checked: spec.bold === true,
-              marker: 'badge-bold',
-              label: labels.bold,
-              onChange: () => patch({ bold: spec.bold !== true }),
-            }),
-            el('span', { className: 'dsh-th-panelLabel' }, labels.bold)),
-        )
-      const textureRow = el(
-        'div',
-        { className: 'dsh-th-field' },
-        el(
-          'div',
-          { className: 'dsh-th-fieldLine' },
-          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeTexture),
-          texture === null
-            ? el('span', { className: 'dsh-th-texEmpty' }, labels.badgeNone)
-            : el('span', {
-                className: 'dsh-th-texThumb',
-                'data-dsh-th': 'badge-thumb',
-                style: { backgroundImage: 'url("' + texture.src + '")' },
-              }),
-          el(
-            'label',
-            { className: 'dsh-th-btn', 'data-outline': '1', 'data-dsh-th': 'badge-upload' },
-            texture === null ? labels.badgeUpload : labels.badgeReplace,
-            el('input', {
-              className: 'dsh-th-file',
-              type: 'file',
-              accept: 'image/*',
-              'data-dsh-th': 'badge-file',
-              onChange: upload,
-            }),
-          ),
-          texture === null
-            ? null
-            : el(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dsh-th-btn',
-                  'data-dsh-th': 'badge-texture-remove',
-                  onClick: () => {
-                    setNote('')
-                    patch({ texture: null })
-                  },
-                },
-                labels.badgeRemoveTexture,
-              ),
+      const shapeRow = row(
+        labels.badgeShape,
+        segment(
+          labels.badgeShape,
+          [
+            ['rounded', labels.badgeShapeRounded],
+            ['pill', labels.badgeShapePill],
+            ['square', labels.badgeShapeSquare],
+          ],
+          spec.shape,
+          (value) => patch({ shape: value }),
+          'badge-shape',
         ),
+      )
+      const strokeRow = row(
+        labels.badgeStroke,
+        segment(
+          labels.badgeStroke,
+          [
+            ['hairline', labels.badgeStrokeHairline],
+            ['solid', labels.badgeStrokeSolid],
+            ['none', labels.badgeNone],
+          ],
+          spec.border,
+          (value) => patch({ border: value }),
+          'badge-stroke',
+        ),
+      )
+      const shadowRow = row(
+        labels.badgeShadow,
+        segment(
+          labels.badgeShadow,
+          [
+            ['none', labels.badgeNone],
+            ['soft', labels.badgeShadowSoft],
+            ['glow', labels.badgeShadowGlow],
+          ],
+          spec.shadow,
+          (value) => patch({ shadow: value }),
+          'badge-shadow',
+        ),
+      )
+      const boldRow = row(
+        labels.bold,
+        el(Switch, {
+          checked: spec.bold === true,
+          marker: 'badge-bold',
+          label: labels.bold,
+          onChange: () => patch({ bold: spec.bold !== true }),
+        }),
+      )
+      const textureRow = row(
+        labels.badgeTexture,
         texture === null
-          ? el('p', { className: 'dsh-th-fieldNote' }, labels.badgeTextureHint)
-          : segment(
-              labels.badgeFit,
-              [['repeat', labels.badgeFitRepeat], ['cover', labels.badgeFitCover], ['contain', labels.badgeFitContain]],
-              texture.fit,
-              (value) => patchTexture({ fit: value }),
-              'badge-fit',
-            ),
+          ? el('span', { className: 'dsh-th-texEmpty' }, labels.badgeNone)
+          : el('span', {
+              className: 'dsh-th-texThumb',
+              'data-dsh-th': 'badge-thumb',
+              style: { backgroundImage: 'url("' + texture.src + '")' },
+            }),
+        el(
+          'label',
+          { className: 'dsh-th-btn', 'data-outline': '1', 'data-dsh-th': 'badge-upload' },
+          texture === null ? labels.badgeUpload : labels.badgeReplace,
+          el('input', {
+            className: 'dsh-th-file',
+            type: 'file',
+            accept: 'image/*',
+            'data-dsh-th': 'badge-file',
+            onChange: upload,
+          }),
+        ),
         texture === null
           ? null
           : el(
-              'div',
-              { className: 'dsh-th-fieldLine' },
-              el('span', { className: 'dsh-th-panelLabel' }, labels.badgeOpacity),
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-btn',
+                'data-dsh-th': 'badge-texture-remove',
+                onClick: () => {
+                  setNote('')
+                  patch({ texture: null })
+                },
+              },
+              labels.badgeRemoveTexture,
+            ),
+        /* What an upload does, on the line under its own controls — and that it stays here. */
+        texture === null ? el('p', { className: 'dsh-th-fieldNote' }, labels.badgeTextureHint) : null,
+      )
+      /*
+       * The last two rows only exist while there is a texture to point them at: how it is
+       * laid into the chip, and how strongly it shows through.
+       */
+      const fitRow =
+        texture === null
+          ? null
+          : row(
+              labels.badgeFit,
+              segment(
+                labels.badgeFit,
+                [['repeat', labels.badgeFitRepeat], ['cover', labels.badgeFitCover], ['contain', labels.badgeFitContain]],
+                texture.fit,
+                (value) => patchTexture({ fit: value }),
+                'badge-fit',
+              ),
+            )
+      const opacityRow =
+        texture === null
+          ? null
+          : row(
+              labels.badgeOpacity,
               el('input', {
                 className: 'dsh-th-range',
                 type: 'range',
@@ -3302,9 +3321,9 @@ window.__ModuleLoader__.load({
                 'data-dsh-th': 'badge-texture-alpha',
                 onChange: (event) => patchTexture({ alpha: badgeNumber(event.target.value, TEXTURE_ALPHA_MIN, TEXTURE_ALPHA_MAX, 0.85) }),
               }),
-            ),
-        note === '' ? null : el('p', { className: 'dsh-th-warn', 'data-dsh-th': 'badge-note' }, note),
-      )
+              /* The same readout the size row carries, so both sliders say what they hold. */
+              el('span', { className: 'dsh-th-hex', 'data-dsh-th': 'badge-texture-alpha-value' }, Math.round(texture.alpha * 100) + '%'),
+            )
       return el(
         'div',
         {
@@ -3337,7 +3356,24 @@ window.__ModuleLoader__.load({
               '×',
             ),
           ),
-          el('div', { className: 'dsh-th-dialogBody' }, preview, templates, size, colors, styleRow, textureRow),
+          el(
+            'div',
+            { className: 'dsh-th-dialogBody' },
+            preview,
+            templates,
+            size,
+            bgRow,
+            inkRow,
+            frameRow,
+            shapeRow,
+            strokeRow,
+            shadowRow,
+            boldRow,
+            textureRow,
+            fitRow,
+            opacityRow,
+            note === '' ? null : el('p', { className: 'dsh-th-warn', 'data-dsh-th': 'badge-note' }, note),
+          ),
           el(
             'div',
             { className: 'dsh-th-dialogFoot' },
