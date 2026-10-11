@@ -529,7 +529,12 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
         }
         return out
       }
-      const wanted = ['dsh-client-ui-chat/lib/client.js', 'dsh-client-ui-primitives/lib/index.js']
+      const wanted = [
+        'dsh-client-ui-chat/lib/client.js',
+        'dsh-client-ui-primitives/lib/index.js',
+        /* Where the reader's content font size is published on `body`, as an inline length. */
+        'dsh-client-ui-layout/lib/client.js',
+      ]
       const entries = collect(header, '', []).filter((entry) => wanted.some((needle) => entry.path.endsWith(needle)))
       check('the installed host bundles were found', entries.length === wanted.length, String(entries.length) + '/' + String(wanted.length))
       for (const entry of entries) {
@@ -537,9 +542,12 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
         readSync(fd, buf, 0, buf.length, baseOffset + entry.offset)
         const text = buf.toString('utf8')
         const isChat = entry.path.endsWith('ui-chat/lib/client.js')
+        const isLayout = entry.path.endsWith('ui-layout/lib/client.js')
         const needles = isChat
           ? ['"data-variant": "think"', 'data-expanded', 'data-turn-process-inline']
-          : ['"data-disclosure-row": true', '"data-open": open || void 0', 'open && children']
+          : isLayout
+            ? ['--dsh-content-font-size', 'setProperty']
+            : ['"data-disclosure-row": true', '"data-open": open || void 0', 'open && children']
         for (const needle of needles) {
           check(
             'the installed build still contains ' + JSON.stringify(needle),
@@ -572,6 +580,19 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
           'and its own stepper still stops at those two ends',
           text.includes('fontSize >= 22') && text.includes('fontSize <= 10'),
           theme.path,
+        )
+        /*
+         * The delta the plugin measures a chip's room against is published as a `calc()`
+         * over that same size, so the plugin derives it: it reads `--dsh-content-font-size`
+         * (which the layout plugin sets on `body` as a plain `<n>px`, asserted above) and
+         * subtracts the default. That arithmetic is the host's, and it is only correct
+         * while this definition holds — a DSH release that changes the formula has to fail
+         * here rather than leave an oversized chip unmeasured.
+         */
+        check(
+          'the installed theme still publishes the body font delta as the size less the default',
+          /--dsh-content-font-delta:\s*calc\(var\(--dsh-content-font-size,\s*14px\)\s*-\s*14px\)/.test(text),
+          theme.path + ' — the plugin derives the delta from that size; if this changed, change hostFontDelta with it',
         )
       }
     } finally {

@@ -82,9 +82,31 @@ appears in **Plugins → 已安装**, where the switch enables or disables it.
 | Expand lifts the box (off by default) | DSH folds a turn's process into a scroll box capped at 400px; with this on, an expanded row temporarily drops that cap so a long chain of thought can be read without scrolling inside the box |
 | Case sensitive | Off (default): `is` also matches `IS` |
 | Keywords | One row per word: text field, `▸ style`, `完整词 / whole word`, suppress, delete |
-| ▸ style panel | Tint colour, text colour (**Theme** hands it back to the host), text size (10–22 px stepper), font, **B**old, **I**talic, **U**nderline for that keyword |
+| ▸ style panel | Tint colour, text colour (**Theme** hands it back to the host), text size (10–22 px stepper), font, **B**old, **I**talic, **U**nderline, and **Badge settings** for that word's chip |
+| All badges (in the keyword heading) | Opens the badge editor for the shared chip look every word follows by default |
 
 Settings live in the browser's `localStorage` and apply immediately.
+
+### Badge settings
+
+The chips that carry each word's count are editable on their own: **徽章设置 / Badge settings** at the end of a
+word's `▸ style` panel opens the editor for that word's chip, and the button in the keyword heading opens the
+same editor for the *shared* badge every word follows. A word leaves the shared look only once something in its
+own editor is changed — until then its row says **跟随全局 / Follows the shared badge**, and the shared badge is
+what its chips are drawn from.
+
+The dialog is the host's own modal (full-viewport layer, masked backdrop, card on the secondary layer), and it
+edits as you go — there is no draft to lose:
+
+| Part | What it does |
+|---|---|
+| Preview | The row the chip will sit on, drawn with the transcript's own chip builder, so what is previewed is what the row will draw |
+| Templates | Six built-in looks (Default, Emphasis, Pill, Outline, Square, Glow) applied in one click, plus **Save as template** for your own — up to 12, each deletable |
+| Size | 0.5×–2.4×, by stepper or slider, with **Follow the word's size** on by default so the chip still tracks that word's text size. A chip taller than the line it sits on makes its row grow instead of being clipped |
+| Colour | Fill, text and frame, each with a colour well and a way back to the theme — the frame can also keep borrowing the word's own colour |
+| Style | Shape (rounded / pill / square), stroke (thin / thick / none), shadow (none / soft / glow) and bold |
+| Texture | An image you upload, redrawn to at most 96 px on its long edge and stored in this browser only; tiled, stretched or fitted, with its own strength |
+| Reset | Hands the word back to the shared badge (or, from the shared editor, everything back to the default look) — it stays available only while there is something to reset |
 
 ## How it works
 
@@ -113,12 +135,31 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   re-render during that time cannot leave the row with nothing to show when the eye comes back on.
 - A keyword that asks for no text colour is marked as `color: currentColor` rather than a fixed hex, so
   "follow the theme" needs no second code path — and the eye-off rule has an inherited value to hand back.
-- The chip's size rides a `--dsh-th-chip-scale` factor on the chip element; the stylesheet grows the chip's line
-  height more slowly than its text and caps it with `--dsh-th-chip-line`, a length the client computes from the
-  host's own `--dsh-content-font-delta` — a chip on a collapsed row sits on a header line the host pins to a
-  fixed height with `contain: size layout`, where an oversized chip would be clipped instead of read. The
-  variable is published on `body`, which is why the cap has to be computed at decoration time: reading it is
-  only possible from a node inside the document, and no stylesheet rule of ours is scoped to `body`.
+- The chip's size rides a `--dsh-th-chip-scale` factor on the chip element; the stylesheet draws the chip's line
+  box at the height the client computed for it (`--dsh-th-chip-line`) — a chip on a collapsed row sits on a header
+  line the host pins to a fixed height with `contain: size layout`, where an oversized chip would be clipped
+  instead of read. The height the host gives that line is `24px + var(--dsh-content-font-delta)`, and the host
+  publishes that delta as a `calc()` over the reader's content font size: a custom property's computed value is
+  the token sequence, not the length it stands for, so the plugin derives the number from the size the host sets
+  as a plain `<n>px` instead. `host-shape.mjs` asserts that definition is still in the installed bundle — reading
+  nothing here is exactly how an oversized chip would go unmeasured.
+- Everything the badge editor can set arrives on the chip as a custom property or a data attribute, and every one
+  of them falls back to the rule that drew the chip before the editor existed — a chip nobody customised carries
+  no paint of its own, so the default look is still the host's tokens and nothing else. The text a chip draws
+  when it stands alone (a dimmer token) survives a customisation that does not touch the ink, because only the
+  fields that were actually given a value are written.
+- A chip scaled past the line it sits on asks its row for the room it needs: the plugin raises the collapsed
+  row's own height and its disclosure line by exactly what the tallest chip on it requires, and puts both back
+  the moment nothing needs them (`setRoom` / `sweepRooms`, the same give-and-take as the fold lift). The row is
+  raised only while it is folded — an expanded row's height is its own content's — so a scaled-up badge is a size
+  rather than a crop.
+- The badge editor is the host's own dialog, spelled with the tokens its Modal primitive uses, and it is mounted
+  inside the settings page rather than portalled: the layer is `position: fixed`, so it covers the viewport from
+  where the plugin already is, and the row it edits is named by id rather than by position — a row deleted while
+  its editor is open closes the editor instead of handing it to whichever row slid into that place.
+- A texture is an uploaded image redrawn to at most 96 px on its long edge, kept as a data URL beside the other
+  settings and drawn by a pseudo-element inside the chip, under its text. Nothing remote is ever stored or
+  requested, and a stored record that names a network address is dropped on the way in.
 - A folded row has no body to read: the host only mounts the chain of thought while expanded, and the whole
   text lives in the host component's `text` prop. The plugin reaches it through the fiber React attaches to
   every element it created (`__reactFiber$…`); anything unexpected reads as "unavailable" and the DOM text is
@@ -135,18 +176,21 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   asserts those two numbers are still in that bundle — a DSH release that changes the range fails a test first.
 - Per-keyword suppression applies to **all rows** (the chip is the same keyword everywhere). The per-row eye is
   the per-row control.
-- *Expand lifts the box* is the one setting that reaches into host layout, which is why it ships off.
+- *Expand lifts the box* and a badge scaled past its line are the two settings that reach into host layout. The
+  badge one is unavoidable — a larger chip cannot be drawn inside a fixed-height line — so it is granted
+  automatically, only while a chip needs it, and given back with the row's own height the moment it does not.
 - Settings live in this browser's `localStorage`. A change made in another window arrives through the browser's
-  `storage` event; the plugin re-reads the store and rebuilds every row.
+  `storage` event; the plugin re-reads the store and rebuilds every row. A texture lives there too, which is why
+  an upload is redrawn small first and refused rather than stored if it is still too large.
 
 ## Development
 
 ```bash
-node evidence/selftest.mjs         #  62 checks: splitting, undoing, counting, case, colour, size, whole-word edges
-node evidence/client-harness.mjs   # 136 checks: the browser half really runs, against a stubbed host
-node evidence/css-check.mjs        #  26 checks: the stylesheet literal (braces, chip/row/panel rules)
-node evidence/locale-check.mjs     #   9 checks: package meta, both locale files and the version tag agree
-node evidence/host-shape.mjs       #  27 checks: the installed row markup, plus its markers in the app bundle
+node evidence/selftest.mjs         #  71 checks: splitting, undoing, counting, case, colour, size, whole-word edges
+node evidence/client-harness.mjs   # 177 checks: the browser half really runs, against a stubbed host
+node evidence/css-check.mjs        #  31 checks: the stylesheet literal (braces, chip/row/panel/editor rules)
+node evidence/locale-check.mjs     #  11 checks: package meta, both locale files and the version tag agree
+node evidence/host-shape.mjs       #  30 checks: the installed row markup, plus its markers in the app bundle
 node evidence/e2e-bundle.mjs <page-url-with-token> @yokira404/dsh-thinking-highlight <cookie>
 ```
 

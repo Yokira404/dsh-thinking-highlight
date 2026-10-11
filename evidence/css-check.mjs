@@ -33,7 +33,47 @@ check('the stylesheet literal is present', css.length > 1000, css.length + ' byt
 check('braces balance', count('{') === count('}'), count('{') + ' open / ' + count('}') + ' close')
 check('chip group rule exists', css.includes('.dsh-th-chips{'), 'present')
 check('chip set rule exists', css.includes('.dsh-th-badge-set{'), 'present')
-check('chip frame rule exists', /\.dsh-th-badge\{[^}]*border:1px solid transparent/.test(css), 'present')
+check(
+  'chip frame rule exists',
+  /\.dsh-th-badge\{[^}]*border-color:var\(--dsh-th-frame,transparent\)/.test(css) &&
+    /\.dsh-th-badge\{[^}]*border-width:var\(--dsh-th-frame-width,1px\)/.test(css),
+  'present',
+)
+/*
+ * The badge editor's own rules: the dialog the host's Modal primitive is spelled with,
+ * the texture layer inside a chip, and the two ways into the editor. Each is here
+ * because it is the part of the feature a screenshot alone cannot hold a future reader
+ * to — and because every one of them is a token, never a fixed colour.
+ */
+check(
+  'the badge editor is the host dialog, spelled with its tokens',
+  /\.dsh-th-veil\{[^}]*position:fixed/.test(css) &&
+    /\.dsh-th-dialog\{[^}]*box-shadow:var\(--dsw-elevation-prominent\)/.test(css) &&
+    /\.dsh-th-mask\{[^}]*--dsw-alias-bg-mask-1/.test(css),
+  'present',
+)
+check(
+  'a texture is a layer inside the chip, under its text',
+  /\.dsh-th-badge::before\{[^}]*background-image:var\(--dsh-th-tex/.test(css) && /\.dsh-th-badge>\*\{[^}]*z-index:1/.test(css),
+  'present',
+)
+check(
+  'the two ways into the editor exist, page and panel',
+  /\.dsh-th-badgeopen\{/.test(css) && /\.dsh-th-badgeopen\[data-placement="page"\]\{/.test(css),
+  'present',
+)
+check(
+  'a shadow is a named mode, so a chip can glow in its own colour',
+  /\.dsh-th-badge\[data-shadow="soft"\]\{/.test(css) && /\.dsh-th-badge\[data-shadow="glow"\]\{[^}]*var\(--dsh-th-frame/.test(css),
+  'present',
+)
+check(
+  'every badge field falls back to the rule that drew it before the editor',
+  /\.dsh-th-badge\{[^}]*border-radius:var\(--dsh-th-radius,6px\)/.test(css) &&
+    /\.dsh-th-badge\{[^}]*font-weight:var\(--dsh-th-weight,400\)/.test(css) &&
+    /\.dsh-th-badge\{[^}]*color:var\(--dsh-th-ink,var\(--dsh-th-ink-default\)\)/.test(css),
+  'present',
+)
 check('chip name keeps the host colour', /\.dsh-th-badge-name\{[^}]*color:inherit/.test(css), 'present')
 check('nothing in the chip set shrinks', /\.dsh-th-badge-set\{[^}]*flex:none/.test(css) && /\.dsh-th-chips\{[^}]*flex:none/.test(css), 'present')
 check('no percentage cap in the chip rules', /\.dsh-th-(badge-set|chips)\{[^}]*max-width:\s*\d+%/.test(css) === false, 'absent')
@@ -82,7 +122,7 @@ check(
 check(
   'the chip scales with its keyword through its own factor',
   /\.dsh-th-badge\{[^}]*font-size:calc\(12px \* var\(--dsh-th-chip-scale,1\)\)/.test(css) &&
-    /\.dsh-th-badge\{[^}]*line-height:min\(calc\(16px \* \(1 \+ \(var\(--dsh-th-chip-scale,1\) - 1\) \* \.667\)\),var\(--dsh-th-chip-line,none\)\)/.test(css),
+    /\.dsh-th-badge\{[^}]*line-height:var\(--dsh-th-chip-line,calc\(16px \* \(1 \+ \(var\(--dsh-th-chip-scale,1\) - 1\) \* \.667\)\)\)/.test(css),
   'present',
 )
 /* Padding stays in px: the chip's box must not grow a second time with its text. */

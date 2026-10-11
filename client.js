@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.3.3'
+    const VERSION = '1.4.0'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -70,6 +70,43 @@ window.__ModuleLoader__.load({
      */
     const CHIP_SCALE_MIN = 0.7
     const CHIP_SCALE_MAX = 1.45
+    /*
+     * How far the reader may push a chip away from that natural size, and the
+     * geometry its look is drawn from. A chip bigger than the line it sits on used
+     * to be the one thing the bound above could not allow: the host pins a collapsed
+     * row to `calc(24px + var(--dsh-content-font-delta))` with `contain: size layout`
+     * and clips its own overflow, so a taller chip is cut off. The room for one is
+     * therefore granted the same way the folded-box lift is — the plugin raises the
+     * row's own height while a chip needs it (`setRoom`), which is what lets the
+     * upper end of this scale be a real size instead of a clipped one.
+     */
+    const BADGE_SCALE_MIN = 0.5
+    const BADGE_SCALE_MAX = 2.4
+    const BADGE_SCALE_STEP = 0.1
+    /** A shape is the radius it draws with; a frame is the width it draws at. */
+    const BADGE_SHAPES = { rounded: '6px', pill: '999px', square: '2px' }
+    const BADGE_SHAPE_IDS = ['rounded', 'pill', 'square']
+    const BADGE_BORDERS = { hairline: 1, solid: 2, none: 0 }
+    const BADGE_BORDER_IDS = ['hairline', 'solid', 'none']
+    const BADGE_SHADOWS = ['none', 'soft', 'glow']
+    const BADGE_BOLD_WEIGHT = '600'
+    /** What a texture may be and how it may be laid into the chip. */
+    const BADGE_FITS = ['repeat', 'cover', 'contain']
+    const TEXTURE_SIZES = { repeat: 'auto', cover: '100% 100%', contain: 'contain' }
+    /*
+     * A texture lives in the same localStorage record as everything else, so it is
+     * a data URL the browser can store: the upload is redrawn to at most 96px on its
+     * long edge before it is kept, and anything that survives that and is still
+     * enormous is refused rather than allowed to fill the whole store.
+     */
+    const TEXTURE_MAX_PX = 96
+    const TEXTURE_MAX_CHARS = 400000
+    const TEXTURE_MAX_FILE = 8 * 1024 * 1024
+    const TEXTURE_ALPHA_MIN = 0.05
+    const TEXTURE_ALPHA_MAX = 1
+    const TEXTURE_ALPHA_STEP = 0.05
+    /** Saved templates are a convenience, not a library: a short list, first in wins. */
+    const TEMPLATE_MAX = 12
 
     /* ──────────────────────────── preferences ──────────────────────────── */
 
@@ -124,6 +161,13 @@ window.__ModuleLoader__.load({
          */
         muted: [],
         rows: DEFAULT_KEYWORDS.map((text) => freshRow(text)),
+        /*
+         * The chip look every keyword follows until it is given one of its own, and
+         * the looks the reader saved as templates. Both are shared state, not per-row:
+         * a keyword's own copy only exists once the reader changed something on it.
+         */
+        badge: badgeDefaults(),
+        badgeTemplates: [],
       }
     }
 
@@ -159,6 +203,12 @@ window.__ModuleLoader__.load({
         /* The two the style panel gained: the words' own ink, and their size. */
         textColor: textColor(row?.textColor),
         fontSize: fontSize(row?.fontSize),
+        /*
+         * The chip's own look. Null is the meaningful value here: it means this
+         * keyword has no opinion and follows the shared badge, which is what keeps a
+         * later change to the shared one reaching every keyword that never overrode it.
+         */
+        badge: screenBadge(row?.badge),
       }
     }
 
@@ -178,7 +228,12 @@ window.__ModuleLoader__.load({
         (item.bold === true ? 'B' : '') +
         (item.italic === true ? 'I' : '') +
         (item.underline === true ? 'U' : '') +
-        String(item.font ?? '')
+        String(item.font ?? '') +
+        /*
+         * The chip's look rides the same key: a chip that was resized or textured has
+         * to be drawn again, and nothing else about the row would say so.
+         */
+        badgeKey(item.badge ?? null)
       )
     }
 
@@ -194,31 +249,204 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The tallest a chip may draw on the header line of a collapsed row, as a CSS
-     * length. The host pins that line to `calc(24px + var(--dsh-content-font-delta))`
-     * with `contain: size layout`, and `--dsh-content-font-delta` is defined only on
-     * `body` — so a property that has to read it can only be computed here, from a node
-     * inside the document, not authored in the stylesheet's own rules.
-     *
-     * 24px is the line's own height; the 21px below is that height less the chip's 2px
-     * frame and a pixel of slack for the row's hairline. A platform that does not define
-     * the variable gets `none`, which leaves the chip's line height to its scale alone —
-     * the behaviour before this cap existed.
+     * One custom property `body` carries, as a number, or null when it is missing, is
+     * not a plain length, or is outside the range a reader's own font size can be. Read
+     * off `body` because that is where the host publishes these, so a node inside the
+     * document is the only thing that can resolve them at all.
      */
-    function chipLineCap() {
-      let delta = null
+    function bodyLength(name, min, max) {
       try {
-        if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function' && document.body !== null) {
-          const raw = window.getComputedStyle(document.body).getPropertyValue('--dsh-content-font-delta')
-          const value = Number.parseFloat(raw)
-          /* A sane number or nothing: a garbage value must not become a cap. */
-          if (Number.isFinite(value) === true && value >= -20 && value <= 40) delta = value
-        }
+        if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function' || document.body === null) return null
+        const value = Number.parseFloat(window.getComputedStyle(document.body).getPropertyValue(name))
+        /* A sane number or nothing: a garbage value must not become a measurement. */
+        if (Number.isFinite(value) === true && value >= min && value <= max) return value
       } catch (error) {
-        /* unreadable custom property: the chip keeps its uncapped line height */
+        /* unreadable custom property: whoever asked keeps its own fallback */
       }
-      return delta === null ? 'none' : 'calc(21px + ' + delta + 'px)'
+      return null
     }
+
+    /**
+     * The host's body font-size delta in px — the one number that says how much taller a
+     * reader's own text made every line of the transcript — or null when it cannot be
+     * known. A collapsed row's own line is `24px + this`, and the room a chip taller than
+     * that line asks for is measured against it.
+     *
+     * The host publishes the delta as a `calc()` — `calc(var(--dsh-content-font-size,14px)
+     * - 14px)` — and a custom property's computed value is the token sequence rather than
+     * the length it stands for, so parsing it directly reads nothing at all. That is not a
+     * detail: it is why an oversized chip went unmeasured in the real app. The plain-length
+     * case is still tried first (another platform may publish one), and otherwise the
+     * arithmetic is the host's own, applied to the size the host does publish as a plain
+     * length. `evidence/host-shape.mjs` asserts that definition is still in the installed
+     * bundle, so a DSH release that changes it fails a test instead of quietly switching
+     * the room off.
+     */
+    function hostFontDelta() {
+      const direct = bodyLength('--dsh-content-font-delta', -20, 40)
+      if (direct !== null) return direct
+      const size = bodyLength('--dsh-content-font-size', 10, 40)
+      return size === null ? null : size - FONT_SIZE_DEFAULT
+    }
+
+    /* ──────────────────────────── badge look ───────────────────────────── */
+
+    /**
+     * How one chip looks when nobody has said otherwise: the size the reader's own
+     * text implies, the host's neutral fill, the keyword's colour on the frame, and
+     * no decoration of its own. Every field here is drawn from tokens rather than
+     * fixed paint, so a chip left alone is the chip the plugin always drew — light
+     * and dark included.
+     */
+    function badgeDefaults() {
+      return {
+        scale: 1,
+        followText: true,
+        bg: 'theme',
+        ink: 'theme',
+        frame: 'keyword',
+        border: 'hairline',
+        shape: 'rounded',
+        shadow: 'none',
+        bold: false,
+        texture: null,
+      }
+    }
+
+    /** A number clamped into the badge's own range, or the fallback for garbage. */
+    function badgeNumber(value, min, max, fallback) {
+      const number = typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''))
+      if (Number.isFinite(number) !== true) return fallback
+      return Math.min(max, Math.max(min, Math.round(number * 100) / 100))
+    }
+
+    /**
+     * One colour of the badge. Three words are colours here as much as `#rrggbb` is:
+     * `theme` hands the field back to the host's tokens, `none` is transparency (the
+     * one way to ask for a bare, outlined chip), and `keyword` keeps the frame on the
+     * word's own colour — which is what an untouched chip does.
+     */
+    function badgePaint(value, fallback) {
+      if (typeof value !== 'string') return fallback
+      const text = value.trim().toLowerCase()
+      if (text === 'theme' || text === 'none' || text === 'keyword') return text
+      return /^#[0-9a-f]{6}$/.test(text) ? text : fallback
+    }
+
+    /**
+     * The uploaded image a chip is textured with, or null. The source is a data URL
+     * and nothing else: a texture is local to this browser, never a network address,
+     * so a stored record can never make the transcript fetch something.
+     */
+    function badgeTexture(value) {
+      if (value === null || typeof value !== 'object') return null
+      const src = typeof value.src === 'string' ? value.src : ''
+      if (/^data:image\//.test(src) !== true || src.length > TEXTURE_MAX_CHARS) return null
+      return {
+        id: typeof value.id === 'string' && value.id !== '' ? value.id : 'tex',
+        src,
+        fit: BADGE_FITS.includes(value.fit) ? value.fit : 'repeat',
+        alpha: badgeNumber(value.alpha, TEXTURE_ALPHA_MIN, TEXTURE_ALPHA_MAX, 0.85),
+      }
+    }
+
+    /** One complete badge look, or null for "no opinion". Stored fields are merged over the defaults. */
+    function screenBadge(value) {
+      if (value === null || typeof value !== 'object') return null
+      const base = badgeDefaults()
+      /* Only the frame can borrow the word's colour, and a frame is never "none": its width says that. */
+      const bg = badgePaint(value.bg, base.bg)
+      const frame = badgePaint(value.frame, base.frame)
+      return {
+        scale: badgeNumber(value.scale, BADGE_SCALE_MIN, BADGE_SCALE_MAX, base.scale),
+        followText: value.followText !== false,
+        bg: bg === 'keyword' ? base.bg : bg,
+        ink: badgePaint(value.ink, base.ink),
+        frame: frame === 'none' ? base.frame : frame,
+        border: BADGE_BORDER_IDS.includes(value.border) ? value.border : base.border,
+        shape: BADGE_SHAPE_IDS.includes(value.shape) ? value.shape : base.shape,
+        shadow: BADGE_SHADOWS.includes(value.shadow) ? value.shadow : base.shadow,
+        bold: value.bold === true,
+        texture: badgeTexture(value.texture),
+      }
+    }
+
+    /** A saved template: a name and the look it stands for, sanitized like any stored badge. */
+    function screenTemplate(value, index) {
+      if (value === null || typeof value !== 'object') return null
+      const spec = screenBadge(value.spec)
+      if (spec === null) return null
+      const name = typeof value.name === 'string' ? value.name.trim().slice(0, 24) : ''
+      return {
+        id: typeof value.id === 'string' && value.id !== '' ? value.id : 'tpl-restored-' + index,
+        name: name === '' ? '' : name,
+        spec,
+      }
+    }
+
+    /** How many pixels of frame a badge carries; the box geometry is built from it. */
+    function badgeBorderWidth(spec) {
+      const width = BADGE_BORDERS[spec?.border ?? 'hairline']
+      return typeof width === 'number' ? width : 1
+    }
+
+    /**
+     * The factor a chip draws at: its keyword's size (unless the reader asked it to
+     * stop following the text) times the badge's own scale. At the defaults this is
+     * exactly `chipScale`, so an untouched chip is unchanged to the pixel.
+     */
+    function chipScaleOf(item, spec) {
+      const follow = spec === null || spec === undefined || spec.followText !== false ? chipScale(item?.fontSize) : 1
+      const own = spec === null || spec === undefined ? 1 : badgeNumber(spec.scale, BADGE_SCALE_MIN, BADGE_SCALE_MAX, 1)
+      return follow * own
+    }
+
+    /** The line box a chip draws its text in at that factor — the stylesheet's own curve. */
+    function chipLineHeight(scale) {
+      return 16 * (1 + (scale - 1) * 0.667)
+    }
+
+    /** The chip's whole box at that factor: its line box plus the frame above and below. */
+    function chipBoxHeight(scale, spec) {
+      return chipLineHeight(scale) + 2 * badgeBorderWidth(spec)
+    }
+
+    /**
+     * Everything about how one chip looks, as one compact string. The chip set is
+     * rebuilt when this changes and left alone when it does not, so a stored texture
+     * contributes its id and length rather than its whole data URL.
+     */
+    function badgeKey(spec) {
+      if (spec === null || spec === undefined) return ''
+      const texture = spec.texture === null ? '' : spec.texture.id + '/' + String(spec.texture.src.length) + '/' + spec.texture.fit + '/' + String(spec.texture.alpha)
+      return (
+        'b' +
+        String(spec.scale) +
+        (spec.followText === false ? 'F' : '') +
+        spec.bg +
+        spec.ink +
+        spec.frame +
+        spec.border +
+        spec.shape +
+        spec.shadow +
+        (spec.bold === true ? 'B' : '') +
+        texture
+      )
+    }
+
+    /**
+     * The looks offered as one-click templates. Each is a patch over the defaults, so
+     * a template can never carry a field it did not mean to set; the dictionaries
+     * hold the names, keyed by the same ids (see `BADGE_TEMPLATE_NAMES`).
+     */
+    const BADGE_PRESETS = [
+      { id: 'default', spec: {} },
+      { id: 'emphasis', spec: { scale: 1.2, bold: true, border: 'solid', shadow: 'soft' } },
+      { id: 'pill', spec: { shape: 'pill', border: 'hairline' } },
+      { id: 'outline', spec: { bg: 'none', border: 'hairline', shadow: 'none' } },
+      { id: 'square', spec: { shape: 'square', border: 'solid' } },
+      { id: 'glow', spec: { bold: true, border: 'solid', shadow: 'glow' } },
+    ]
 
     /** One keyword row with every field the settings page can set. */
     function freshRow(text) {
@@ -265,6 +493,9 @@ window.__ModuleLoader__.load({
       base.caseSensitive = raw.caseSensitive === true
       base.chipsWhenCollapsed = raw.chipsWhenCollapsed !== false
       base.liftOnExpand = raw.liftOnExpand === true
+      /* An older record has no badge at all, which reads as "the defaults". */
+      base.badge = screenBadge(raw.badge) ?? badgeDefaults()
+      base.badgeTemplates = (Array.isArray(raw.badgeTemplates) ? raw.badgeTemplates : []).slice(0, TEMPLATE_MAX).map(screenTemplate).filter(Boolean)
       const stored = Array.isArray(raw.rows) ? raw.rows : []
       if (stored.length > 0) base.rows = stored.slice(0, MAX_KEYWORDS).map(screenRow)
       /* Older state (or a hand-edited one) may hold duplicates; the first one wins. */
@@ -295,6 +526,8 @@ window.__ModuleLoader__.load({
         chipsWhenCollapsed: state.chipsWhenCollapsed,
         liftOnExpand: state.liftOnExpand,
         muted: state.muted.slice(),
+        badge: state.badge,
+        badgeTemplates: state.badgeTemplates.map((template) => ({ ...template })),
         rows: state.rows.map((row, index) => ({ ...row, key: 'r' + index + '-' + row.id })),
       }
     }
@@ -396,6 +629,71 @@ window.__ModuleLoader__.load({
         bold: '加粗',
         italic: '斜体',
         underline: '下划线',
+        badgeSettings: '徽章设置',
+        badgeSettingsHint: '徽章的大小、颜色、样式与纹理',
+        badgeShared: '全部徽章',
+        badgeSharedHint: '所有关键词默认跟随的徽章外观；单个词可以有自己的设置',
+        badgeSubjectGlobal: '所有关键词的默认',
+        badgeOwn: '这个词有自己的设置',
+        badgeFollows: '跟随全局',
+        badgePreview: '预览',
+        badgePreviewNote: '放大后行高会自动让位，徽章不会被裁掉',
+        badgePreviewText: '折叠行后面的预览文字',
+        badgeTemplates: '模板',
+        badgeSaveTemplate: '存为模板',
+        badgeTemplateName: '模板名字',
+        badgeSave: '保存',
+        badgeCancel: '取消',
+        badgeDeleteTemplate: '删除模板',
+        badgeTemplateCopy: '的副本',
+        badgeTemplatesFull: '模板已达上限（最多 12 个）',
+        badgeReset: '还原',
+        badgeResetOwn: '恢复成跟随全局的徽章',
+        badgeResetGlobal: '把所有徽章恢复成默认外观',
+        badgeDone: '完成',
+        badgeClose: '关闭',
+        badgeSize: '大小',
+        badgeSizeUp: '放大一档',
+        badgeSizeDown: '缩小一档',
+        badgeFollowText: '跟随文字大小',
+        badgeFollowTextHint: '关掉后徽章不再跟着这个词的字号变，只按上面的倍数画',
+        badgeColors: '颜色',
+        badgeBg: '底色',
+        badgeInk: '文字',
+        badgeFrame: '边框色',
+        badgeTheme: '主题',
+        badgeKeyword: '词色',
+        badgeNoFill: '透明',
+        badgeStyle: '样式',
+        badgeShape: '形状',
+        badgeShapeRounded: '圆角',
+        badgeShapePill: '胶囊',
+        badgeShapeSquare: '方框',
+        badgeStroke: '描边',
+        badgeStrokeHairline: '细',
+        badgeStrokeSolid: '粗',
+        badgeNone: '无',
+        badgeShadow: '阴影',
+        badgeShadowSoft: '柔和',
+        badgeShadowGlow: '发光',
+        badgeTexture: '纹理',
+        badgeTextureHint: '上传一张图片作为徽章底纹；图片只存在这台浏览器里，不会上传',
+        badgeUpload: '上传图片',
+        badgeReplace: '换一张',
+        badgeRemoveTexture: '去掉纹理',
+        badgeFit: '填充',
+        badgeFitRepeat: '平铺',
+        badgeFitCover: '拉伸',
+        badgeFitContain: '居中',
+        badgeOpacity: '显影',
+        badgeTextureTooBig: '这张图太大了，换一张小一点的',
+        badgeTextureFailed: '读不出这张图片，换一张试试',
+        badgeTemplateDefault: '默认',
+        badgeTemplateEmphasis: '强调',
+        badgeTemplatePill: '胶囊',
+        badgeTemplateOutline: '描边',
+        badgeTemplateSquare: '方框',
+        badgeTemplateGlow: '夜光',
       },
       en: {
         nav: 'Thinking Highlighter',
@@ -450,6 +748,71 @@ window.__ModuleLoader__.load({
         bold: 'Bold',
         italic: 'Italic',
         underline: 'Underline',
+        badgeSettings: 'Badge settings',
+        badgeSettingsHint: 'Size, colour, style and texture of the count badge',
+        badgeShared: 'All badges',
+        badgeSharedHint: 'The badge every keyword follows; a single keyword can have its own',
+        badgeSubjectGlobal: 'Default for every keyword',
+        badgeOwn: 'This keyword has its own',
+        badgeFollows: 'Follows the shared badge',
+        badgePreview: 'Preview',
+        badgePreviewNote: 'The row makes room for it, so a larger badge is never clipped',
+        badgePreviewText: 'the folded preview follows the chips',
+        badgeTemplates: 'Templates',
+        badgeSaveTemplate: 'Save as template',
+        badgeTemplateName: 'Template name',
+        badgeSave: 'Save',
+        badgeCancel: 'Cancel',
+        badgeDeleteTemplate: 'Delete template',
+        badgeTemplateCopy: 'copy',
+        badgeTemplatesFull: 'Template limit reached (12 max)',
+        badgeReset: 'Reset',
+        badgeResetOwn: 'Go back to following the shared badge',
+        badgeResetGlobal: 'Restore the default look for every badge',
+        badgeDone: 'Done',
+        badgeClose: 'Close',
+        badgeSize: 'Size',
+        badgeSizeUp: 'One step larger',
+        badgeSizeDown: 'One step smaller',
+        badgeFollowText: 'Follow the word’s size',
+        badgeFollowTextHint: 'Off, the badge stops following this word’s text size and draws at the factor alone',
+        badgeColors: 'Colour',
+        badgeBg: 'Fill',
+        badgeInk: 'Text',
+        badgeFrame: 'Frame',
+        badgeTheme: 'Theme',
+        badgeKeyword: 'Word',
+        badgeNoFill: 'None',
+        badgeStyle: 'Style',
+        badgeShape: 'Shape',
+        badgeShapeRounded: 'Rounded',
+        badgeShapePill: 'Pill',
+        badgeShapeSquare: 'Square',
+        badgeStroke: 'Stroke',
+        badgeStrokeHairline: 'Thin',
+        badgeStrokeSolid: 'Thick',
+        badgeNone: 'None',
+        badgeShadow: 'Shadow',
+        badgeShadowSoft: 'Soft',
+        badgeShadowGlow: 'Glow',
+        badgeTexture: 'Texture',
+        badgeTextureHint: 'Upload an image to fill the badge with; it stays in this browser and is never uploaded',
+        badgeUpload: 'Upload image',
+        badgeReplace: 'Replace',
+        badgeRemoveTexture: 'Remove texture',
+        badgeFit: 'Fill',
+        badgeFitRepeat: 'Tile',
+        badgeFitCover: 'Stretch',
+        badgeFitContain: 'Fit',
+        badgeOpacity: 'Strength',
+        badgeTextureTooBig: 'That image is too large — try a smaller one',
+        badgeTextureFailed: 'That image could not be read — try another',
+        badgeTemplateDefault: 'Default',
+        badgeTemplateEmphasis: 'Emphasis',
+        badgeTemplatePill: 'Pill',
+        badgeTemplateOutline: 'Outline',
+        badgeTemplateSquare: 'Square',
+        badgeTemplateGlow: 'Glow',
       },
     }
 
@@ -498,9 +861,23 @@ window.__ModuleLoader__.load({
  * fallback of 1 is what a keyword left at the default size gets, so that chip is exactly
  * the chip it always was.
  */
-.dsh-th-badge{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 6px;border-radius:6px;font:inherit;font-size:calc(12px * var(--dsh-th-chip-scale,1));line-height:min(calc(16px * (1 + (var(--dsh-th-chip-scale,1) - 1) * .667)),var(--dsh-th-chip-line,none));color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover);border:1px solid transparent;cursor:pointer}
-.dsh-th-badge[data-count="1"]{color:var(--dsw-alias-label-tertiary)}
-.dsh-th-badge:hover{background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-badge{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 6px;border-radius:var(--dsh-th-radius,6px);font:inherit;font-size:calc(12px * var(--dsh-th-chip-scale,1));line-height:var(--dsh-th-chip-line,calc(16px * (1 + (var(--dsh-th-chip-scale,1) - 1) * .667)));font-weight:var(--dsh-th-weight,400);color:var(--dsh-th-ink,var(--dsh-th-ink-default));background:var(--dsh-th-bg,var(--dsw-alias-interactive-bg-hover));border-style:solid;border-width:var(--dsh-th-frame-width,1px);border-color:var(--dsh-th-frame,transparent);cursor:pointer}
+/*
+ * Every field the badge editor can set arrives as one of the custom properties above,
+ * and each of them falls back to the value this chip drew with before the editor
+ * existed. That is what keeps a chip nobody has customised byte-identical: no inline
+ * paint at all, only the host's own tokens.
+ */
+.dsh-th-badge{--dsh-th-ink-default:var(--dsw-alias-label-secondary)}
+.dsh-th-badge[data-count="1"]{--dsh-th-ink-default:var(--dsw-alias-label-tertiary)}
+/* The uploaded texture, laid into the chip's own box; the chip's text stays on top. */
+.dsh-th-badge::before{content:'';position:absolute;inset:0;border-radius:inherit;background-image:var(--dsh-th-tex,none);background-repeat:var(--dsh-th-tex-repeat,repeat);background-size:var(--dsh-th-tex-size,auto);background-position:center;opacity:var(--dsh-th-tex-alpha,1);pointer-events:none}
+.dsh-th-badge>*{position:relative;z-index:1}
+/* Shadows are the one decoration a token cannot express as a colour alone, so they
+   are named modes; the glow borrows whichever colour the frame already carries. */
+.dsh-th-badge[data-shadow="soft"]{box-shadow:0 1px 3px rgb(0 0 0 / 18%)}
+.dsh-th-badge[data-shadow="glow"]{box-shadow:0 0 0 1px var(--dsh-th-frame,var(--dsw-alias-border-l3)),0 0 6px 1px var(--dsh-th-frame,var(--dsw-alias-border-l3))}
+.dsh-th-badge:hover{background:var(--dsh-th-bg,var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover)))}
 .dsh-th-badge:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 /*
  * Switched off from the chip itself. The chip keeps its place and its count — it
@@ -512,7 +889,7 @@ window.__ModuleLoader__.load({
 .dsh-th-badge[data-muted="1"] .dsh-th-badge-x{opacity:.35}
 .dsh-th-badge-name{display:inline-block;max-width:7em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;background:transparent}
 .dsh-th-badge-x{opacity:.55}
-.dsh-th-count{color:var(--dsw-alias-label-caption);font-variant-numeric:tabular-nums}
+.dsh-th-count{color:var(--dsh-th-count-ink,var(--dsw-alias-label-caption));font-variant-numeric:tabular-nums}
 .dsh-th-acts{display:flex;align-items:center;flex:none;margin-left:2px}
 .dsh-th-eye{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;opacity:.45;transition:opacity 120ms ease,color 120ms ease,background-color 120ms ease}
 [data-open]:hover .dsh-th-eye,.dsh-th-eye:focus-visible{opacity:1}
@@ -629,6 +1006,69 @@ window.__ModuleLoader__.load({
 .dsh-th-add:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
 .dsh-th-reset{margin-left:auto;height:36px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:18px;cursor:pointer}
 .dsh-th-reset:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+/*
+ * The badge editor is the host's own dialog, spelled with the tokens its Modal
+ * primitive uses (a full-viewport layer, a masked backdrop, and a card on the
+ * secondary layer with the prominent elevation), because the settings page it opens
+ * from is that shell's own surface. It renders where the plugin already is — inside
+ * the settings page — so it needs no portal and no service the plugin does not have.
+ */
+.dsh-th-veil{pointer-events:auto;position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:max(24px,var(--dsh-frame-overlay-top,24px)) 24px}
+.dsh-th-mask{position:absolute;inset:var(--dsh-frame-chrome-top,0px) 0 0;background:var(--dsw-alias-bg-mask-1,rgb(0 0 0 / 32%));backdrop-filter:var(--dsw-mask-blur)}
+.dsh-th-dialog{box-sizing:border-box;position:relative;z-index:1;display:flex;flex-direction:column;width:min(580px,100%);max-height:100%;padding:0 0 20px;overflow:hidden;border-radius:var(--dsw-radius-panel,16px);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base));box-shadow:var(--dsw-elevation-prominent)}
+.dsh-th-dialogHead{display:flex;align-items:center;gap:8px;padding:22px 14px 12px 24px}
+.dsh-th-dialogTitle{margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--dsw-alias-label-primary)}
+.dsh-th-dialogSubject{max-width:12em;padding:0 8px;border-radius:6px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-hover);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-th-dialogClose{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:auto;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary);font-size:15px;line-height:1;cursor:pointer}
+.dsh-th-dialogClose:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-th-dialogBody{display:flex;flex-direction:column;gap:16px;min-height:0;overflow:auto;padding:0 24px}
+.dsh-th-dialogFoot{display:flex;align-items:center;gap:8px;padding:18px 24px 0}
+/* The dialog's own state line leads the footer; the two actions answer it on the right. */
+.dsh-th-dialogFoot .dsh-th-panelLabel{margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The preview is the transcript's own line, drawn with the transcript's own parts:
+   a title, the separator dot, then the chips and the folded preview text after them. */
+.dsh-th-preview{display:flex;align-items:center;gap:8px;padding:12px;border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-markdown-code-block,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-previewLine{display:flex;align-items:center;min-width:0;flex:auto}
+.dsh-th-previewTitle{flex:none;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary)}
+.dsh-th-previewDot{flex:none;width:2px;height:2px;margin:0 8px;border-radius:1px;background:var(--dsw-alias-label-caption)}
+.dsh-th-previewText{min-width:0;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-th-field{display:flex;flex-direction:column;gap:8px}
+/* A field's own controls sit in lines; a lone button hugs its label instead of the width. */
+.dsh-th-field>.dsh-th-btn{align-self:flex-start}
+.dsh-th-fieldLine{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dsh-th-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;cursor:pointer}
+.dsh-th-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-th-btn[data-primary]{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));color:var(--dsw-alias-label-primary-foreground)}
+.dsh-th-btn[data-primary]:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,var(--dsw-alias-brand-primary))}
+.dsh-th-btn[data-outline]{box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l3)}
+.dsh-th-btn:disabled{opacity:.4;cursor:not-allowed}
+.dsh-th-btn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+/* A template is a look you can put on in one click: the presets, then your own. */
+.dsh-th-tpls{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.dsh-th-tplWrap{display:inline-flex;align-items:center;gap:2px;padding-right:4px;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-tplWrap .dsh-th-tpl{background:transparent}
+.dsh-th-tpl{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 10px;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.dsh-th-tpl:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover-solid,var(--dsw-alias-interactive-bg-hover))}
+.dsh-th-tpl:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-tplX{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-right:-2px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:1;cursor:pointer}
+.dsh-th-tplX:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-error-primary)}
+.dsh-th-name{height:30px;min-width:8em;padding:0 10px;border:.5px solid transparent;border-radius:8px;background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;outline:none}
+.dsh-th-name:focus{border-color:var(--dsw-alias-state-business-primary)}
+/* The texture: a thumbnail of what is uploaded, how it is laid in, and how strongly. */
+.dsh-th-tex{display:flex;align-items:center;gap:10px}
+.dsh-th-texThumb{width:40px;height:40px;flex:none;border-radius:10px;background-position:center;background-size:cover;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l2),0 1px 2px rgb(0 0 0 / 8%)}
+.dsh-th-texEmpty{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border-radius:10px;color:var(--dsw-alias-label-dimmed);font-size:11px;line-height:1;box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l2)}
+.dsh-th-file{display:none}
+.dsh-th-range{flex:1;min-width:120px;max-width:220px;height:24px;accent-color:var(--dsw-alias-brand-primary)}
+.dsh-th-fieldNote{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+/* The two ways into the editor: the panel's own button, and the one that edits the
+   shared badge the whole list follows (which sits on the page, not in a panel). */
+.dsh-th-badgeopen{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:0;border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.dsh-th-badgeopen[data-placement="page"]{height:36px;padding:0 14px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);font-size:13px}
+.dsh-th-badgeopen:hover{color:var(--dsw-alias-label-primary)}
+.dsh-th-badgeopen[data-own]{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground)}
+.dsh-th-badgeopen:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}
+.dsh-th-dotmark{width:6px;height:6px;flex:none;border-radius:50%;background:currentColor}
 `
 
     /**
@@ -1026,6 +1466,100 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /* ── the room a scaled-up chip asks its row for ─────────────────────────── */
+
+    /**
+     * Elements whose own height the plugin raised so a chip could draw at the size the
+     * reader asked for, with the inline value to put back. The host pins a collapsed
+     * row — and the disclosure line inside it — to `calc(24px +
+     * var(--dsh-content-font-delta))` with `contain: size layout` and `overflow:
+     * hidden`, so a chip taller than that line is cut off rather than read. The badge
+     * editor's size therefore comes with height, taken while it is needed and given
+     * back the moment it is not.
+     */
+    const rooms = new Map()
+
+    /** Put one element's own height back, exactly as it was. */
+    function restoreRoom(element) {
+      if (rooms.has(element) !== true) return
+      const previous = rooms.get(element)
+      rooms.delete(element)
+      if (previous === '') element.style.removeProperty('height')
+      else element.style.height = previous
+    }
+
+    /**
+     * Raise one element by `extra` px on top of the height the host pins it to. The
+     * expression keeps the host's own variable in the calc rather than freezing a
+     * number, so a reader who changes the content font size still moves the row.
+     */
+    function setRoom(element, extra) {
+      if (extra <= 0) {
+        restoreRoom(element)
+        return
+      }
+      if (rooms.has(element) !== true) rooms.set(element, element.style.height ?? '')
+      const value = 'calc(24px + var(--dsh-content-font-delta,0px) + ' + extra + 'px)'
+      if (element.style.height !== value) element.style.height = value
+    }
+
+    /**
+     * How many pixels taller than the host's own line one chip is, over the tallest
+     * chip a row shows. Zero for every chip that already fits, which is every chip at
+     * the sizes this plugin drew before the editor existed.
+     */
+    function badgeRoom(items, specOf, linePx) {
+      if (linePx === null || linePx === undefined) return 0
+      let extra = 0
+      for (const item of items) {
+        const spec = specOf(item)
+        extra = Math.max(extra, Math.ceil(chipBoxHeight(chipScaleOf(item, spec), spec) - linePx))
+      }
+      return Math.max(0, extra)
+    }
+
+    /**
+     * Give one row the room its chips need: the disclosure line it draws on, and — while
+     * the row is folded — the row itself, whose height the host pins with containment.
+     * An expanded row is left alone: its height is its content's, and raising it there
+     * would push the transcript around for nothing.
+     */
+    function applyRoom(root, header, extra, expanded) {
+      const line = header === null || header === undefined ? null : header.querySelector('[data-disclosure-row]')
+      if (line !== null) setRoom(line, extra)
+      if (expanded === true) restoreRoom(root)
+      else setRoom(root, extra)
+    }
+
+    /**
+     * Re-assert every row's chip room and drop the ones nothing needs any more. A host
+     * re-render that rebuilds the disclosure line takes the inline height away with the
+     * element, and that row would then clip its own chips until something else about it
+     * changed — so the sweep puts the room back, exactly as the fold lift does.
+     */
+    function sweepRooms(roots) {
+      const live = new Set()
+      for (const root of roots ?? liveRoots()) {
+        const entry = rows.get(root)
+        const extra = entry?.roomExtra ?? 0
+        if (extra <= 0) continue
+        const header = headerRowOf(root)
+        if (header === null) continue
+        const line = header.querySelector('[data-disclosure-row]')
+        if (line !== null) {
+          setRoom(line, extra)
+          live.add(line)
+        }
+        if (root.hasAttribute('data-expanded') !== true) {
+          setRoom(root, extra)
+          live.add(root)
+        }
+      }
+      for (const element of [...rooms.keys()]) {
+        if (live.has(element) !== true) restoreRoom(element)
+      }
+    }
+
     /**
      * Where one row's chip set sits: inside the disclosure header's own text line,
      * right after the title and its separator, ahead of the collapsed preview.
@@ -1084,6 +1618,112 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * One chip, as an element: the keyword's name, the ×, its count, and the click that
+     * switches this keyword off. The transcript and the badge editor's preview are both
+     * built here, so what the preview shows is what the row draws — one function, not
+     * two drawings that can drift apart.
+     *
+     * Everything the reader can change rides a custom property or a data attribute, and
+     * every one of those falls back to the value the chip drew with before the editor
+     * existed: a chip nobody customised carries no paint of its own at all.
+     */
+    function buildChip(item, spec, options) {
+      const muted = item.muted === true
+      /*
+       * What the reader asked the badge itself to be: 1 is "the size it always was", and
+       * everything below is multiplied by it. It rides the chip's own font size — which is
+       * what carries the count's digits and the box around them — and the name previewing
+       * the word, because a chip drawn large with its name left at the reader's own text
+       * size reads as a mistake rather than as a setting.
+       */
+      const own = spec === null || spec === undefined ? 1 : badgeNumber(spec.scale, BADGE_SCALE_MIN, BADGE_SCALE_MAX, 1)
+      const scale = chipScaleOf(item, spec)
+      /*
+       * The line box the chip draws in: its own text's height at this factor, which the
+       * row is then asked to make room for. It is handed over as `--dsh-th-chip-line`, so
+       * the stylesheet draws the chip at the height this same arithmetic measured.
+       */
+      const line = chipLineHeight(scale)
+      const style = {
+        '--dsh-th-chip-scale': String(scale),
+        '--dsh-th-chip-line': line.toFixed(2) + 'px',
+      }
+      const nameStyle = markStyle(item)
+      if (nameStyle !== null && own !== 1) {
+        /* The name's size is the word's own, clamped by the word's own range — times the badge. */
+        nameStyle.fontSize = (fontSize(item.fontSize) * own).toFixed(1) + 'px'
+      }
+      if (muted !== true) {
+        if (spec === null || spec === undefined) {
+          /* Nobody has an opinion: the keyword's colour rides the frame, as it always has. */
+          style.borderColor = hex(item.color)
+        } else {
+          /*
+           * Only the fields that were actually given a value are written. Everything
+           * left alone keeps its stylesheet fallback — including the states the sheet
+           * expresses per chip, like the dimmer text a single occurrence draws in — so a
+           * badge nobody customised is drawn by exactly the rules that always drew it.
+           */
+          const fill = badgeColorOf(spec.bg)
+          if (spec.bg === 'none') style['--dsh-th-bg'] = 'transparent'
+          else if (fill !== null) style['--dsh-th-bg'] = fill
+          const ink = badgeColorOf(spec.ink)
+          if (ink !== null) {
+            style['--dsh-th-ink'] = ink
+            /* An ink of its own dims the count by that same ink, so the pair stays readable. */
+            style['--dsh-th-count-ink'] = 'color-mix(in srgb, ' + ink + ' 72%, transparent)'
+          }
+          const frame = badgeColorOf(spec.frame)
+          if (frame !== null) style['--dsh-th-frame'] = frame
+          else if (spec.frame === 'theme') style['--dsh-th-frame'] = 'var(--dsw-alias-border-l3)'
+          else style.borderColor = hex(item.color)
+          if (spec.border !== 'hairline') style['--dsh-th-frame-width'] = badgeBorderWidth(spec) + 'px'
+          if (spec.shape !== 'rounded') style['--dsh-th-radius'] = BADGE_SHAPES[spec.shape] ?? BADGE_SHAPES.rounded
+          if (spec.bold === true) style['--dsh-th-weight'] = BADGE_BOLD_WEIGHT
+          if (spec.texture !== null) {
+            style['--dsh-th-tex'] = 'url("' + spec.texture.src + '")'
+            style['--dsh-th-tex-size'] = TEXTURE_SIZES[spec.texture.fit] ?? 'auto'
+            style['--dsh-th-tex-repeat'] = spec.texture.fit === 'repeat' ? 'repeat' : 'no-repeat'
+            style['--dsh-th-tex-alpha'] = String(spec.texture.alpha)
+          }
+        }
+      }
+      const hint = item.text + ' × ' + item.count + ' · ' + (muted ? options.labels.chipUnmute : options.labels.chipMute)
+      return React.createElement(
+        'button',
+        {
+          key: item.id,
+          type: 'button',
+          className: 'dsh-th-badge',
+          'data-count': String(item.count),
+          'data-muted': muted ? '1' : undefined,
+          'data-shadow': muted !== true && spec !== null && spec !== undefined && spec.shadow !== 'none' ? spec.shadow : undefined,
+          'aria-pressed': muted ? 'false' : 'true',
+          'aria-label': hint,
+          title: hint,
+          style,
+          /*
+           * The chip is also this keyword's switch. The click stops at the chip so it
+           * cannot also fold or unfold the row it sits on.
+           */
+          onClick(event) {
+            event.preventDefault()
+            event.stopPropagation()
+            if (typeof options.onToggleKeyword === 'function') options.onToggleKeyword(item.id)
+          },
+        },
+        React.createElement('span', { className: 'dsh-th-badge-name', style: nameStyle ?? undefined }, item.text),
+        React.createElement('span', { className: 'dsh-th-badge-x' }, '×'),
+        React.createElement('span', { className: 'dsh-th-count' }, String(item.count)),
+      )
+    }
+
+    /** A badge field's own colour when it has one, or null while it is a token, a word or a mode. */
+    function badgeColorOf(value) {
+      return typeof value === 'string' && value.startsWith('#') === true ? value : null
+    }
+
+    /**
      * Render the chip set into the plugin's own container. React owns every node
      * inside it, so the host tree never re-renders or removes anything of ours.
      */
@@ -1114,6 +1754,8 @@ window.__ModuleLoader__.load({
     function decorate(root, entry, counts, colors, options) {
       const header = headerRowOf(root)
       if (header === null) return
+      /* Read here rather than taken from the caller: the room below is the row's own. */
+      const expanded = isExpanded(root, header)
       const eye = (next) => {
         entry.highlighted = next
         setHighlight(root, next === true && options.enabled === true)
@@ -1135,61 +1777,24 @@ window.__ModuleLoader__.load({
       }
       const children = []
       const chips = []
+      /*
+       * What one chip draws with: its keyword's own look, or the shared one every
+       * keyword follows until it is given one of its own. Resolved once here and used
+       * for the chip, for the room it asks for, and for the key that decides whether
+       * the set has to be drawn again.
+       */
+      const specOf = (item) => (item.badge === null || item.badge === undefined ? options.badge ?? null : item.badge)
       for (const item of counts) {
-        const muted = item.muted === true
-        const hint = item.text + ' × ' + item.count + ' · ' + (muted ? options.labels.chipUnmute : options.labels.chipMute)
         /*
          * The chip's own size follows its keyword's: the reader set the size to make
          * that word stand out, so a chip still drawn at the default size would
          * contradict the word it points at. `--dsh-th-chip-scale` carries the factor and
          * the stylesheet applies it to the chip's font size and line height; its padding
-         * and radius stay as they are, because the box a chip draws must not grow a
-         * second time with the text inside it.
-         *
-         * The keyword's color rides the chip's own frame, and only an un-muted chip
-         * carries it. The name keeps the host's text color and the chip keeps its
-         * neutral background, so the name can never end up the same color as the
-         * surface behind it; a muted chip is expressed by the stylesheet's dashed,
-         * dimmed frame alone.
+         * stays as it is, because the box a chip draws must not grow a second time with
+         * the text inside it. Everything else the badge editor can set rides the same
+         * one element — see `buildChip`.
          */
-        const chipStyle = { '--dsh-th-chip-scale': String(chipScale(item.fontSize)) }
-        if (muted !== true) chipStyle.borderColor = colors[item.text]
-        /*
-         * The tallest the chip may draw. The host's variable is resolved here rather
-         * than in the stylesheet because it has to be arithmetic on a host value: the
-         * chip may take the header line's height minus the 2px its own frame adds.
-         * `none` (the fallback) means the variable is missing, and then the chip keeps
-         * the line height it derived from its scale alone.
-         */
-        chipStyle['--dsh-th-chip-line'] = options.chipLine ?? chipLineCap()
-        chips.push(
-          React.createElement(
-            'button',
-            {
-              key: item.id,
-              type: 'button',
-              className: 'dsh-th-badge',
-              'data-count': String(item.count),
-              'data-muted': muted ? '1' : undefined,
-              'aria-pressed': muted ? 'false' : 'true',
-              'aria-label': hint,
-              title: hint,
-              style: chipStyle,
-              /*
-               * The chip is also this keyword's switch. The click stops at the
-               * chip so it cannot also fold or unfold the row it sits on.
-               */
-              onClick(event) {
-                event.preventDefault()
-                event.stopPropagation()
-                if (typeof options.onToggleKeyword === 'function') options.onToggleKeyword(item.id)
-              },
-            },
-            React.createElement('span', { className: 'dsh-th-badge-name', style: markStyle(item) ?? undefined }, item.text),
-            React.createElement('span', { className: 'dsh-th-badge-x' }, '×'),
-            React.createElement('span', { className: 'dsh-th-count' }, String(item.count)),
-          ),
-        )
+        chips.push(buildChip(item, specOf(item), options))
       }
       /*
        * The chips shrink and clip first; the eye stays whole. A percentage cap here
@@ -1231,8 +1836,17 @@ window.__ModuleLoader__.load({
         /* Collapsed, and the reader asked to keep collapsed rows unmarked. */
         if (entry.mount !== undefined) unmountBadges(entry)
         entry.mountKey = undefined
+        entry.roomExtra = 0
+        applyRoom(root, header, 0, expanded)
         return
       }
+      /*
+       * The room the chips need, granted before anything is drawn: a chip scaled past
+       * the host's own line height would otherwise be clipped by the row it sits on.
+       */
+      const room = badgeRoom(counts, specOf, options.chipLinePx)
+      entry.roomExtra = room
+      applyRoom(root, header, room, expanded)
       const seat = chipSeatOf(header)
       if (entry.mount === undefined) {
         entry.mount = document.createElement('div')
@@ -1249,8 +1863,9 @@ window.__ModuleLoader__.load({
       }
       /*
        * The key covers everything a chip shows: its count, its off state, the size it
-       * draws at, the text style its name previews — and the language of its label and
-       * tooltip, which changes with nothing else on the row.
+       * draws at, the look the badge editor gave it, the text style its name previews —
+       * and the language of its label and tooltip, which changes with nothing else on
+       * the row.
        */
       const key =
         counts
@@ -1261,7 +1876,7 @@ window.__ModuleLoader__.load({
               item.count +
               (item.muted === true ? '!' : '') +
               'z' +
-              String(chipScale(item.fontSize)) +
+              String(chipScaleOf(item, specOf(item))) +
               styleKey(item),
           )
           .join('|') +
@@ -1532,6 +2147,8 @@ window.__ModuleLoader__.load({
               underline: item.underline === true,
               textColor: item.textColor ?? null,
               fontSize: item.fontSize,
+              /* The chip's own look, or null while this keyword follows the shared one. */
+              badge: item.badge ?? null,
             })
           }
         }
@@ -1685,14 +2302,19 @@ window.__ModuleLoader__.load({
             underline: row.underline === true,
             textColor: row.textColor ?? null,
             fontSize: row.fontSize,
+            badge: row.badge ?? null,
           })
         }
         /*
          * Everything that changes how a hit looks belongs in the key: a changed key is
-         * what tells every row to drop its body cache and mark the text again.
+         * what tells every row to drop its body cache and mark the text again. A keyword's
+         * own badge rides `styleKey` with the rest of its styling, and the shared badge
+         * rides here — a keyword following it stores no opinion of its own, so without
+         * this a change to the shared look would reach the settings page and never the
+         * transcript.
          */
         const patternKey =
-          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + items.map((item) => item.id + '=' + item.text + styleKey(item)).join(',')
+          String(settings.enabled) + '|' + String(settings.caseSensitive) + '|' + String(settings.chipsWhenCollapsed) + '|' + String(settings.liftOnExpand) + '|' + settings.muted.join(',') + '|' + badgeKey(settings.badge) + '|' + items.map((item) => item.id + '=' + item.text + styleKey(item)).join(',')
         /*
          * What a chip click does: one keyword in or out of the muted list, persisted
          * like any other setting. Every row hears about it on the next pass, so a
@@ -1700,10 +2322,14 @@ window.__ModuleLoader__.load({
          */
         const toggleKeyword = (id) => patch({ muted: toggleIn(settings.muted, id) })
         /*
-         * The tallest a chip may draw, read once for the whole pass instead of once per
-         * chip: it is a computed-style lookup on `body`, and every row's chips share it.
+         * The height the host gives a collapsed row's own line, read once for the whole
+         * pass instead of once per chip: it is a computed-style lookup on `body`, and
+         * every row measures its chips against the same line. Null when the host does not
+         * publish the variable, and then no chip is ever taller than a line nobody can
+         * measure — so no row is touched.
          */
-        const chipLine = chipLineCap()
+        const delta = hostFontDelta()
+        const chipLinePx = delta === null ? null : 24 + delta
         const roots = liveRoots()
         let decorated = 0
         for (const root of roots) {
@@ -1718,7 +2344,9 @@ window.__ModuleLoader__.load({
               /* A control inside a row (the eye) can ask for a pass by itself. */
               requestPass: schedule,
               labels,
-              chipLine,
+              chipLinePx,
+              /* The shared badge every keyword follows until it is given one of its own. */
+              badge: settings.badge,
               /* The language is a rendering concern of its own: see `labelsChanged`. */
               lang: settings.lang,
               labelsKey: settings.lang,
@@ -1751,6 +2379,8 @@ window.__ModuleLoader__.load({
         if (sweeps % 8 === 0) sweepRows()
         /* Caps last: the loop above is what asks for them. */
         sweepLifts(settings.liftOnExpand === true)
+        /* Rooms too — a rebuilt header line takes its inline height away with it. */
+        sweepRooms(roots)
       }
       /*
        * Testing seam: run one pass immediately, without the cache reset `refresh`
@@ -1783,6 +2413,8 @@ window.__ModuleLoader__.load({
         if (scheduled !== 0) window.clearTimeout(scheduled)
         scheduled = 0
         for (const box of [...lifts.keys()]) restoreLift(box)
+        /* The room a scaled-up chip was given is the plugin's too: give it back. */
+        for (const element of [...rooms.keys()]) restoreRoom(element)
         for (const root of liveRoots()) {
           unmountBadges(stateOf(root))
           const body = bodyOf(root)
@@ -2079,8 +2711,670 @@ window.__ModuleLoader__.load({
               styleOf('B', 'bold', row.bold, props.boldLabel),
               styleOf('I', 'italic', row.italic, props.italicLabel),
               styleOf('U', 'underline', row.underline, props.underlineLabel),
+              /*
+               * The badge's own editor. It sits at the end of the style panel because it
+               * is the deepest thing the panel holds: one look for the chip this word
+               * draws in the transcript, with the shared look as its starting point.
+               */
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-th-badgeopen',
+                  'data-dsh-th': 'badge-open',
+                  'data-own': row.badge === null || row.badge === undefined ? undefined : '1',
+                  'aria-label': props.badgeSettingsLabel,
+                  title: props.badgeSettingsHint,
+                  onClick: props.onBadgeOpen,
+                },
+                props.badgeSettingsLabel,
+              ),
             )
           : null,
+      )
+    }
+
+    /* ───────────────────────────── badge editor ────────────────────────── */
+
+    /**
+     * Redraw one uploaded image small enough to keep. A texture is stored as a data URL
+     * in the same record as every other setting, and a photograph straight off a camera
+     * would fill that store on its own: the long edge is capped at 96px, the aspect
+     * ratio is kept, and a browser that cannot do either is told so rather than handed a
+     * texture the next reload would quietly drop.
+     */
+    function shrinkTexture(src, done) {
+      const keep = () => done(src.length <= TEXTURE_MAX_CHARS ? src : null)
+      try {
+        if (typeof window === 'undefined' || typeof window.Image !== 'function') {
+          keep()
+          return
+        }
+        const image = new window.Image()
+        image.onload = () => {
+          try {
+            const canvas = document.createElement('canvas')
+            if (typeof canvas.getContext !== 'function') {
+              keep()
+              return
+            }
+            const width = image.width || TEXTURE_MAX_PX
+            const height = image.height || TEXTURE_MAX_PX
+            const ratio = Math.min(1, TEXTURE_MAX_PX / Math.max(width, height))
+            canvas.width = Math.max(1, Math.round(width * ratio))
+            canvas.height = Math.max(1, Math.round(height * ratio))
+            const context = canvas.getContext('2d')
+            if (context === null || context === undefined || typeof context.drawImage !== 'function') {
+              keep()
+              return
+            }
+            context.drawImage(image, 0, 0, canvas.width, canvas.height)
+            const out = typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : ''
+            if (typeof out === 'string' && out.length > 22 && out.length <= TEXTURE_MAX_CHARS) {
+              done(out)
+              return
+            }
+            keep()
+          } catch (error) {
+            keep()
+          }
+        }
+        image.onerror = () => done(null)
+        image.src = src
+      } catch (error) {
+        done(null)
+      }
+    }
+
+    /**
+     * The badge editor: one dialog for one chip's look, with the row it will be drawn on
+     * previewed at the top so every change is seen where it lands. It edits as it goes —
+     * there is no draft to lose and no cancel that could silently throw a choice away —
+     * and its two ends are the two ways out: `Reset` hands the chip back to the shared
+     * look, `Done` closes the dialog and changes nothing else.
+     *
+     * The preview is built by the transcript's own chip builder, so it cannot drift from
+     * what the row will draw.
+     */
+    function BadgeEditor(props) {
+      const labels = props.labels
+      const spec = props.spec
+      const [naming, setNaming] = React.useState(false)
+      const [name, setName] = React.useState('')
+      const [note, setNote] = React.useState('')
+      /* Escape closes it, like every other dialog on this shell. */
+      React.useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const onKey = (event) => {
+          if (event.key === 'Escape') props.onClose()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => {
+          if (typeof window.removeEventListener === 'function') window.removeEventListener('keydown', onKey)
+        }
+      }, [])
+      const el = React.createElement
+      const patch = props.onPatch
+      const sample = props.sample
+      const texture = spec.texture
+      const patchTexture = (changes) => {
+        if (texture === null) return
+        patch({ texture: { ...texture, ...changes } })
+      }
+      /*
+       * What the colour well offers for a field that is not a colour of its own. It has
+       * to be something concrete — `<input type="color">` cannot express "the theme" —
+       * and it is deliberately the value the field falls back to, so accepting the well
+       * unedited is not a surprise.
+       */
+      const swatchOf = (field) => {
+        const value = spec[field]
+        if (typeof value === 'string' && value.startsWith('#') === true) return value
+        if (field === 'frame') return hex(sample.color)
+        if (field === 'ink') return DEFAULT_TEXT_COLOR
+        return '#eceef2'
+      }
+      const isOwn = (field) => typeof spec[field] === 'string' && spec[field].startsWith('#') === true
+      /* What a field that carries no colour of its own says instead of a hex value. */
+      const namedChoice = (field, quicks) => {
+        const match = quicks.find(([value]) => spec[field] === value)
+        return match === undefined ? quicks[0][2] : match[2]
+      }
+      const well = (field, label, quicks) =>
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine', key: field },
+          el('span', { className: 'dsh-th-panelLabel' }, label),
+          el(
+            'label',
+            { className: 'dsh-th-color', title: label },
+            el('input', {
+              className: 'dsh-th-swatch',
+              type: 'color',
+              value: swatchOf(field),
+              'aria-label': label,
+              'data-dsh-th': 'badge-well-' + field,
+              onChange: (event) => patch({ [field]: hex(event.target.value) }),
+            }),
+            el('span', {
+              className: 'dsh-th-dot',
+              'data-dsh-th': 'badge-dot-' + field,
+              /*
+               * `currentColor` is the panel's own text colour, which is the token this field
+               * falls back to — so the dot previews the theme choice itself. A field that
+               * asks for no fill shows the empty square its own hairline draws.
+               */
+              style: { backgroundColor: isOwn(field) ? spec[field] : spec[field] === 'none' ? 'transparent' : 'currentColor' },
+            }),
+            el('span', { className: 'dsh-th-hex' }, isOwn(field) ? String(spec[field]).toUpperCase() : namedChoice(field, quicks)),
+          ),
+          quicks.map(([value, marker, text]) =>
+            el(
+              'button',
+              {
+                key: marker,
+                type: 'button',
+                className: 'dsh-th-follow',
+                'data-dsh-th': 'badge-quick-' + marker,
+                'data-following': spec[field] === value ? '1' : undefined,
+                'aria-pressed': spec[field] === value ? 'true' : 'false',
+                'aria-label': text,
+                title: text,
+                onClick: () => patch({ [field]: value }),
+              },
+              text,
+            ),
+          ),
+        )
+      const segment = (label, entries, current, onPick, marker) =>
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine' },
+          el('span', { className: 'dsh-th-panelLabel' }, label),
+          el(
+            'div',
+            { className: 'dsh-th-seg', role: 'group', 'aria-label': label },
+            entries.map(([id, text]) =>
+              el(
+                'button',
+                {
+                  key: id,
+                  type: 'button',
+                  className: 'dsh-th-seg-item',
+                  'data-dsh-th': marker + '-' + id,
+                  'data-on': current === id ? '1' : undefined,
+                  'aria-pressed': current === id ? 'true' : 'false',
+                  onClick: () => onPick(id),
+                },
+                text,
+              ),
+            ),
+          ),
+        )
+      const upload = (event) => {
+        const file = event.target.files === null || event.target.files === undefined ? null : event.target.files[0]
+        /* The field keeps no value of its own: the same image may be picked again. */
+        event.target.value = ''
+        if (file === null || file === undefined) return
+        if (typeof file.size === 'number' && file.size > TEXTURE_MAX_FILE) {
+          setNote(labels.badgeTextureTooBig)
+          return
+        }
+        if (typeof window.FileReader !== 'function') {
+          setNote(labels.badgeTextureFailed)
+          return
+        }
+        const reader = new window.FileReader()
+        reader.onload = () => {
+          const src = typeof reader.result === 'string' ? reader.result : ''
+          if (/^data:image\//.test(src) !== true) {
+            setNote(labels.badgeTextureFailed)
+            return
+          }
+          shrinkTexture(src, (kept) => {
+            if (kept === null) {
+              setNote(labels.badgeTextureTooBig)
+              return
+            }
+            setNote('')
+            patch({
+              texture: {
+                id: 'tex' + Date.now().toString(36),
+                src: kept,
+                fit: texture === null ? 'repeat' : texture.fit,
+                alpha: texture === null ? 0.85 : texture.alpha,
+              },
+            })
+          })
+        }
+        reader.onerror = () => setNote(labels.badgeTextureFailed)
+        try {
+          reader.readAsDataURL(file)
+        } catch (error) {
+          setNote(labels.badgeTextureFailed)
+        }
+      }
+      const save = () => {
+        const message = props.onSaveTemplate(name)
+        if (typeof message === 'string' && message !== '') {
+          setNote(message)
+          return
+        }
+        setNaming(false)
+        setName('')
+        setNote('')
+      }
+      /* The transcript's own chip, drawn by the transcript's own builder. */
+      const preview = el(
+        'div',
+        { className: 'dsh-th-field' },
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine' },
+          el('span', { className: 'dsh-th-panelLabel' }, labels.badgePreview),
+          el('span', { className: 'dsh-th-fieldNote' }, labels.badgePreviewNote),
+        ),
+        el(
+          'div',
+          { className: 'dsh-th-preview', 'data-dsh-th': 'badge-preview' },
+          el(
+            'div',
+            { className: 'dsh-th-previewLine' },
+            el('span', { className: 'dsh-th-previewTitle' }, 'think'),
+            el('span', { className: 'dsh-th-previewDot', 'aria-hidden': 'true' }),
+            el(
+              'span',
+              { className: 'dsh-th-badge-set' },
+              el(
+                'span',
+                { className: 'dsh-th-chips' },
+                buildChip({ ...sample, id: 'badge-preview-chip', count: 3, muted: false }, spec, {
+                  labels,
+                }),
+              ),
+              el(
+                'span',
+                { className: 'dsh-th-acts' },
+                el(
+                  'span',
+                  { className: 'dsh-th-eye', 'aria-hidden': 'true' },
+                  el(EyeIcon, { slashed: false }),
+                ),
+              ),
+            ),
+            el('span', { className: 'dsh-th-previewText' }, sample.preview),
+          ),
+        ),
+      )
+      const templates = el(
+        'div',
+        { className: 'dsh-th-field' },
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine' },
+          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeTemplates),
+          el(
+            'div',
+            { className: 'dsh-th-tpls' },
+            BADGE_PRESETS.map((preset) =>
+              el(
+                'button',
+                {
+                  key: preset.id,
+                  type: 'button',
+                  className: 'dsh-th-tpl',
+                  'data-dsh-th': 'badge-tpl-' + preset.id,
+                  'aria-label': labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
+                  onClick: () => props.onApply({ ...badgeDefaults(), ...preset.spec }),
+                },
+                labels['badgeTemplate' + preset.id.charAt(0).toUpperCase() + preset.id.slice(1)],
+              ),
+            ),
+            props.templates.map((template) =>
+              el(
+                'span',
+                { key: template.id, className: 'dsh-th-tplWrap' },
+                el(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsh-th-tpl',
+                    'data-dsh-th': 'badge-tpl-saved',
+                    title: template.name,
+                    onClick: () => props.onApply(template.spec),
+                  },
+                  template.name,
+                ),
+                el(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsh-th-tplX',
+                    'data-dsh-th': 'badge-tpl-delete',
+                    'aria-label': labels.badgeDeleteTemplate,
+                    title: labels.badgeDeleteTemplate,
+                    onClick: () => props.onDeleteTemplate(template.id),
+                  },
+                  '×',
+                ),
+              ),
+            ),
+          ),
+        ),
+        naming === true
+          ? el(
+              'div',
+              { className: 'dsh-th-fieldLine' },
+              el('input', {
+                className: 'dsh-th-name',
+                type: 'text',
+                value: name,
+                placeholder: labels.badgeTemplateName,
+                'aria-label': labels.badgeTemplateName,
+                'data-dsh-th': 'badge-template-name',
+                spellCheck: false,
+                onChange: (event) => setName(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') save()
+                },
+              }),
+              el(
+                'button',
+                { type: 'button', className: 'dsh-th-btn', 'data-primary': '1', 'data-dsh-th': 'badge-template-save', onClick: save },
+                labels.badgeSave,
+              ),
+              el(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-th-btn',
+                  'data-dsh-th': 'badge-template-cancel',
+                  onClick: () => {
+                    setNaming(false)
+                    setNote('')
+                  },
+                },
+                labels.badgeCancel,
+              ),
+            )
+          : el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-btn',
+                'data-outline': '1',
+                'data-dsh-th': 'badge-template-new',
+                disabled: props.templates.length >= TEMPLATE_MAX,
+                title: props.templates.length >= TEMPLATE_MAX ? labels.badgeTemplatesFull : labels.badgeSaveTemplate,
+                onClick: () => setNaming(true),
+              },
+              labels.badgeSaveTemplate,
+            ),
+      )
+      const size = el(
+        'div',
+        { className: 'dsh-th-fieldLine' },
+        el('span', { className: 'dsh-th-panelLabel' }, labels.badgeSize),
+        el(
+          'div',
+          { className: 'dsh-th-size', 'data-dsh-th': 'badge-size' },
+          el('span', { className: 'dsh-th-sizeValue', 'data-dsh-th': 'badge-size-value' }, spec.scale.toFixed(2)),
+          el('span', { className: 'dsh-th-sizeUnit' }, '×'),
+          el(
+            'span',
+            { className: 'dsh-th-sizeArrows' },
+            el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-arrow',
+                'data-dsh-th': 'badge-size-up',
+                disabled: spec.scale >= BADGE_SCALE_MAX,
+                'aria-label': labels.badgeSizeUp,
+                title: labels.badgeSizeUp,
+                onClick: () => patch({ scale: badgeNumber(spec.scale + BADGE_SCALE_STEP, BADGE_SCALE_MIN, BADGE_SCALE_MAX, 1) }),
+              },
+              el(StepIcon, { up: true }),
+            ),
+            el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-arrow',
+                'data-dsh-th': 'badge-size-down',
+                disabled: spec.scale <= BADGE_SCALE_MIN,
+                'aria-label': labels.badgeSizeDown,
+                title: labels.badgeSizeDown,
+                onClick: () => patch({ scale: badgeNumber(spec.scale - BADGE_SCALE_STEP, BADGE_SCALE_MIN, BADGE_SCALE_MAX, 1) }),
+              },
+              el(StepIcon, { up: false }),
+            ),
+          ),
+        ),
+        /* A slider beside the stepper: a size worth changing is worth one gesture. */
+        el('input', {
+          className: 'dsh-th-range',
+          type: 'range',
+          min: BADGE_SCALE_MIN,
+          max: BADGE_SCALE_MAX,
+          step: BADGE_SCALE_STEP,
+          value: String(spec.scale),
+          'aria-label': labels.badgeSize,
+          'data-dsh-th': 'badge-scale',
+          onChange: (event) => patch({ scale: badgeNumber(event.target.value, BADGE_SCALE_MIN, BADGE_SCALE_MAX, 1) }),
+        }),
+        el(Switch, {
+          checked: spec.followText !== false,
+          marker: 'badge-follow',
+          label: labels.badgeFollowText,
+          onChange: () => patch({ followText: spec.followText === false }),
+        }),
+        el('span', { className: 'dsh-th-panelLabel' }, labels.badgeFollowText),
+      )
+      const colors = el(
+        'div',
+        { className: 'dsh-th-field' },
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine' },
+          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeColors),
+        ),
+        well('bg', labels.badgeBg, [
+          ['theme', 'bg-theme', labels.badgeTheme],
+          ['none', 'bg-none', labels.badgeNoFill],
+        ]),
+        well('ink', labels.badgeInk, [['theme', 'ink-theme', labels.badgeTheme]]),
+        well('frame', labels.badgeFrame, [
+          ['keyword', 'frame-keyword', labels.badgeKeyword],
+          ['theme', 'frame-theme', labels.badgeTheme],
+        ]),
+      )
+      const styleRow =
+        el('div', { className: 'dsh-th-field' },
+          el('div', { className: 'dsh-th-fieldLine' }, el('span', { className: 'dsh-th-panelLabel' }, labels.badgeStyle)),
+          segment(
+            labels.badgeShape,
+            [
+              ['rounded', labels.badgeShapeRounded],
+              ['pill', labels.badgeShapePill],
+              ['square', labels.badgeShapeSquare],
+            ],
+            spec.shape,
+            (value) => patch({ shape: value }),
+            'badge-shape',
+          ),
+          segment(
+            labels.badgeStroke,
+            [
+              ['hairline', labels.badgeStrokeHairline],
+              ['solid', labels.badgeStrokeSolid],
+              ['none', labels.badgeNone],
+            ],
+            spec.border,
+            (value) => patch({ border: value }),
+            'badge-stroke',
+          ),
+          segment(
+            labels.badgeShadow,
+            [
+              ['none', labels.badgeNone],
+              ['soft', labels.badgeShadowSoft],
+              ['glow', labels.badgeShadowGlow],
+            ],
+            spec.shadow,
+            (value) => patch({ shadow: value }),
+            'badge-shadow',
+          ),
+          el('div', { className: 'dsh-th-fieldLine' },
+            el(Switch, {
+              checked: spec.bold === true,
+              marker: 'badge-bold',
+              label: labels.bold,
+              onChange: () => patch({ bold: spec.bold !== true }),
+            }),
+            el('span', { className: 'dsh-th-panelLabel' }, labels.bold)),
+        )
+      const textureRow = el(
+        'div',
+        { className: 'dsh-th-field' },
+        el(
+          'div',
+          { className: 'dsh-th-fieldLine' },
+          el('span', { className: 'dsh-th-panelLabel' }, labels.badgeTexture),
+          texture === null
+            ? el('span', { className: 'dsh-th-texEmpty' }, labels.badgeNone)
+            : el('span', {
+                className: 'dsh-th-texThumb',
+                'data-dsh-th': 'badge-thumb',
+                style: { backgroundImage: 'url("' + texture.src + '")' },
+              }),
+          el(
+            'label',
+            { className: 'dsh-th-btn', 'data-outline': '1', 'data-dsh-th': 'badge-upload' },
+            texture === null ? labels.badgeUpload : labels.badgeReplace,
+            el('input', {
+              className: 'dsh-th-file',
+              type: 'file',
+              accept: 'image/*',
+              'data-dsh-th': 'badge-file',
+              onChange: upload,
+            }),
+          ),
+          texture === null
+            ? null
+            : el(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-th-btn',
+                  'data-dsh-th': 'badge-texture-remove',
+                  onClick: () => {
+                    setNote('')
+                    patch({ texture: null })
+                  },
+                },
+                labels.badgeRemoveTexture,
+              ),
+        ),
+        texture === null
+          ? el('p', { className: 'dsh-th-fieldNote' }, labels.badgeTextureHint)
+          : segment(
+              labels.badgeFit,
+              [['repeat', labels.badgeFitRepeat], ['cover', labels.badgeFitCover], ['contain', labels.badgeFitContain]],
+              texture.fit,
+              (value) => patchTexture({ fit: value }),
+              'badge-fit',
+            ),
+        texture === null
+          ? null
+          : el(
+              'div',
+              { className: 'dsh-th-fieldLine' },
+              el('span', { className: 'dsh-th-panelLabel' }, labels.badgeOpacity),
+              el('input', {
+                className: 'dsh-th-range',
+                type: 'range',
+                min: TEXTURE_ALPHA_MIN,
+                max: TEXTURE_ALPHA_MAX,
+                step: TEXTURE_ALPHA_STEP,
+                value: String(texture.alpha),
+                'aria-label': labels.badgeOpacity,
+                'data-dsh-th': 'badge-texture-alpha',
+                onChange: (event) => patchTexture({ alpha: badgeNumber(event.target.value, TEXTURE_ALPHA_MIN, TEXTURE_ALPHA_MAX, 0.85) }),
+              }),
+            ),
+        note === '' ? null : el('p', { className: 'dsh-th-warn', 'data-dsh-th': 'badge-note' }, note),
+      )
+      return el(
+        'div',
+        {
+          className: 'dsh-th-veil',
+          'data-dsh-th': 'badge-veil',
+          /* A click that landed on the layer itself, not inside the card, closes it. */
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget) props.onClose()
+          },
+        },
+        el('div', { className: 'dsh-th-mask', 'aria-hidden': 'true' }),
+        el(
+          'div',
+          { className: 'dsh-th-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': labels.badgeSettings, 'data-dsh-th': 'badge-dialog' },
+          el(
+            'div',
+            { className: 'dsh-th-dialogHead' },
+            el('h2', { className: 'dsh-th-dialogTitle' }, labels.badgeSettings),
+            el('span', { className: 'dsh-th-dialogSubject', title: props.subject, 'data-dsh-th': 'badge-subject' }, props.subject),
+            el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-dialogClose',
+                'data-dsh-th': 'badge-close',
+                'aria-label': labels.badgeClose,
+                title: labels.badgeClose,
+                onClick: props.onClose,
+              },
+              '×',
+            ),
+          ),
+          el('div', { className: 'dsh-th-dialogBody' }, preview, templates, size, colors, styleRow, textureRow),
+          el(
+            'div',
+            { className: 'dsh-th-dialogFoot' },
+            el(
+              'span',
+              { className: 'dsh-th-panelLabel', 'data-dsh-th': 'badge-state' },
+              props.state,
+            ),
+            el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-btn',
+                'data-outline': '1',
+                'data-dsh-th': 'badge-reset',
+                disabled: props.canReset !== true,
+                title: props.resetHint,
+                onClick: () => {
+                  setNote('')
+                  props.onReset()
+                },
+              },
+              labels.badgeReset,
+            ),
+            el(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-btn',
+                'data-primary': '1',
+                'data-dsh-th': 'badge-done',
+                onClick: props.onClose,
+              },
+              labels.badgeDone,
+            ),
+          ),
+        ),
       )
     }
 
@@ -2098,6 +3392,62 @@ window.__ModuleLoader__.load({
         const setRows = (next) => patch({ rows: next })
         /* The row whose last edit was refused for duplicating another keyword. */
         const [rejected, setRejected] = React.useState(null)
+        /*
+         * Which badge the editor has open: one keyword's own, or the shared one every
+         * keyword follows by default. The target is held by row id rather than by index,
+         * so a row deleted while its editor is open closes the editor instead of
+         * quietly handing it to whichever row slid into that position.
+         */
+        const [badgeTarget, setBadgeTarget] = React.useState(null)
+        const badgeRow =
+          badgeTarget !== null && badgeTarget.kind === 'row' ? settings.rows.find((item) => item.id === badgeTarget.id) : undefined
+        const badgeOpen = badgeTarget !== null && (badgeTarget.kind === 'shared' || badgeRow !== undefined)
+        /* What the editor is editing: the row's own look, or the shared one it inherits. */
+        const badgeSpec = badgeTarget !== null && badgeTarget.kind === 'row' && badgeRow !== undefined && badgeRow.badge !== null ? badgeRow.badge : settings.badge
+        const badgeWrite = (next) => {
+          if (badgeTarget === null) return
+          if (badgeTarget.kind === 'shared') {
+            patch({ badge: next })
+            return
+          }
+          setRows(settings.rows.map((item) => (item.id === badgeTarget.id ? { ...item, badge: next } : item)))
+        }
+        /* A change to one field: the row materialises the shared look first, then edits it. */
+        const badgePatch = (changes) => {
+          if (badgeTarget === null) return
+          const base = badgeTarget.kind === 'row' && badgeRow !== undefined && badgeRow.badge !== null ? badgeRow.badge : settings.badge
+          badgeWrite({ ...base, ...changes })
+        }
+        const badgeReset = () => {
+          if (badgeTarget === null) return
+          /* Back to following: null is that statement for a row, the defaults for the list. */
+          badgeWrite(badgeTarget.kind === 'shared' ? badgeDefaults() : null)
+        }
+        const badgeSaveTemplate = (value) => {
+          const name = typeof value === 'string' ? value.trim() : ''
+          if (name === '') return labels.badgeTemplateName
+          if (settings.badgeTemplates.length >= TEMPLATE_MAX) return labels.badgeTemplatesFull
+          patch({
+            badgeTemplates: settings.badgeTemplates.concat({
+              id: 'tpl' + Date.now().toString(36),
+              name: name.slice(0, 24),
+              spec: badgeSpec,
+            }),
+          })
+          return ''
+        }
+        const badgeSample = {
+          text: badgeRow !== undefined && badgeRow.text.trim() !== '' ? badgeRow.text.trim() : labels.keywordPlaceholder,
+          preview: labels.badgePreviewText,
+          color: badgeRow === undefined ? DEFAULT_COLOR : badgeRow.color,
+          whole: badgeRow === undefined ? false : badgeRow.whole === true,
+          font: badgeRow === undefined ? 'default' : badgeRow.font,
+          bold: badgeRow === undefined ? false : badgeRow.bold === true,
+          italic: badgeRow === undefined ? false : badgeRow.italic === true,
+          underline: badgeRow === undefined ? false : badgeRow.underline === true,
+          textColor: badgeRow === undefined ? null : badgeRow.textColor,
+          fontSize: badgeRow === undefined ? FONT_SIZE_DEFAULT : badgeRow.fontSize,
+        }
         /*
          * Committing a keyword's text. A word may exist once: when the typed text is
          * the same keyword as another row (trimmed, and case-folded while matching
@@ -2214,6 +3564,24 @@ window.__ModuleLoader__.load({
               React.createElement('span', { className: 'dsh-th-settitle' }, labels.keywords),
               React.createElement('span', { className: 'dsh-th-setdesc' }, labels.keywordsHint),
             ),
+            /*
+             * The shared badge, from the one place that speaks for the whole list. Each
+             * keyword's own editor starts from it, so it is also what "follow" means.
+             */
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-th-badgeopen',
+                'data-placement': 'page',
+                'data-dsh-th': 'badge-shared',
+                'data-own': badgeKey(settings.badge) === badgeKey(badgeDefaults()) ? undefined : '1',
+                'aria-label': labels.badgeShared,
+                title: labels.badgeSharedHint,
+                onClick: () => setBadgeTarget({ kind: 'shared' }),
+              },
+              labels.badgeShared,
+            ),
           ),
           React.createElement(
             'div',
@@ -2249,6 +3617,9 @@ window.__ModuleLoader__.load({
                     boldLabel: labels.bold,
                     italicLabel: labels.italic,
                     underlineLabel: labels.underline,
+                    badgeSettingsLabel: labels.badgeSettings,
+                    badgeSettingsHint: labels.badgeSettingsHint,
+                    onBadgeOpen: () => setBadgeTarget({ kind: 'row', id: row.id }),
                     onCommitText: (value) => commitText(value, row.id, index),
                     onEdit: () => setRejected(null),
                     warning: rejected !== null && rejected.id === row.id ? labels.duplicate + ' 「' + rejected.text + '」' : undefined,
@@ -2309,6 +3680,39 @@ window.__ModuleLoader__.load({
               labels.reset,
             ),
           ),
+          /*
+           * The badge editor, when something opened it. It lives at the end of the page
+           * rather than inside a keyword row because a fixed layer inside the row's own
+           * layout would be clipped by the panel it was opened from; the row it edits is
+           * named by id, so it does not care where it is mounted.
+           */
+          badgeOpen === true
+            ? React.createElement(BadgeEditor, {
+                labels,
+                spec: badgeSpec,
+                subject: badgeTarget.kind === 'shared' ? labels.badgeSubjectGlobal : badgeSample.text,
+                /* What the dialog says it is editing, in the reader's own words. */
+                state:
+                  badgeTarget.kind === 'shared'
+                    ? labels.badgeSubjectGlobal
+                    : (badgeRow.badge ?? null) === null
+                      ? labels.badgeFollows
+                      : labels.badgeOwn,
+                canReset:
+                  badgeTarget.kind === 'shared'
+                    ? badgeKey(settings.badge) !== badgeKey(badgeDefaults())
+                    : (badgeRow.badge ?? null) !== null,
+                resetHint: badgeTarget.kind === 'shared' ? labels.badgeResetGlobal : labels.badgeResetOwn,
+                templates: settings.badgeTemplates,
+                sample: badgeSample,
+                onPatch: badgePatch,
+                onApply: (next) => badgeWrite(screenBadge(next) ?? badgeDefaults()),
+                onReset: badgeReset,
+                onSaveTemplate: badgeSaveTemplate,
+                onDeleteTemplate: (id) => patch({ badgeTemplates: settings.badgeTemplates.filter((item) => item.id !== id) }),
+                onClose: () => setBadgeTarget(null),
+              })
+            : null,
         )
       }
     }
@@ -2603,6 +4007,7 @@ window.__ModuleLoader__.load({
                 if (body !== null) unwrapBody(body)
               }
               for (const box of [...lifts.keys()]) restoreLift(box)
+              for (const element of [...rooms.keys()]) restoreRoom(element)
               forgetRows()
             },
             /* Testing seam: the same functions the reconciler runs, so a DOM
@@ -2626,6 +4031,20 @@ window.__ModuleLoader__.load({
               restoreLift,
               sweepLifts,
               lifts,
+              setRoom,
+              restoreRoom,
+              sweepRooms,
+              rooms,
+              hostFontDelta,
+              badgeDefaults,
+              screenBadge,
+              screenTemplate,
+              badgeKey,
+              badgeRoom,
+              chipScaleOf,
+              chipLineHeight,
+              chipBoxHeight,
+              buildChip,
             },
           }
           window.__DSH_TH__ = runtime

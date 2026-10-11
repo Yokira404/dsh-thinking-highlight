@@ -179,6 +179,17 @@ const ns = new Function(
     'const FONT_SIZE_DEFAULT = ' + constant('FONT_SIZE_DEFAULT'),
     'const CHIP_SCALE_MIN = ' + constant('CHIP_SCALE_MIN'),
     'const CHIP_SCALE_MAX = ' + constant('CHIP_SCALE_MAX'),
+    'const BADGE_SCALE_MIN = ' + constant('BADGE_SCALE_MIN'),
+    'const BADGE_SCALE_MAX = ' + constant('BADGE_SCALE_MAX'),
+    'const BADGE_SHAPES = ' + constant('BADGE_SHAPES'),
+    'const BADGE_SHAPE_IDS = ' + constant('BADGE_SHAPE_IDS'),
+    'const BADGE_BORDERS = ' + constant('BADGE_BORDERS'),
+    'const BADGE_BORDER_IDS = ' + constant('BADGE_BORDER_IDS'),
+    'const BADGE_SHADOWS = ' + constant('BADGE_SHADOWS'),
+    'const BADGE_FITS = ' + constant('BADGE_FITS'),
+    'const TEXTURE_MAX_CHARS = ' + constant('TEXTURE_MAX_CHARS'),
+    'const TEXTURE_ALPHA_MIN = ' + constant('TEXTURE_ALPHA_MIN'),
+    'const TEXTURE_ALPHA_MAX = ' + constant('TEXTURE_ALPHA_MAX'),
     'const marks = new WeakMap()',
     extract('escapeRegExp'),
     extract('keywordBody'),
@@ -192,10 +203,22 @@ const ns = new Function(
     extract('unwrapBody'),
     extract('wrapNode'),
     extract('markStyle'),
+    extract('badgeDefaults'),
+    extract('badgeNumber'),
+    extract('badgePaint'),
+    extract('badgeTexture'),
+    extract('screenBadge'),
+    extract('badgeBorderWidth'),
+    extract('badgeKey'),
+    extract('chipScaleOf'),
+    extract('chipLineHeight'),
+    extract('chipBoxHeight'),
     extract('styleKey'),
     extract('chipScale'),
-    extract('chipLineCap'),
-    'return { buildPattern, countMatches, toTint, escapeRegExp, matchSegments, wrapNode, unwrapBody, hex, textColor, fontSize, markStyle, styleKey, chipScale, chipLineCap, marks, FONT_SIZE_MIN, FONT_SIZE_MAX, FONT_SIZE_DEFAULT }',
+    extract('bodyLength'),
+    extract('hostFontDelta'),
+    extract('badgeRoom'),
+    'return { buildPattern, countMatches, toTint, escapeRegExp, matchSegments, wrapNode, unwrapBody, hex, textColor, fontSize, markStyle, styleKey, chipScale, bodyLength, hostFontDelta, badgeRoom, badgeDefaults, screenBadge, badgeKey, badgeBorderWidth, chipScaleOf, chipLineHeight, chipBoxHeight, badgeTexture, marks, FONT_SIZE_MIN, FONT_SIZE_MAX, FONT_SIZE_DEFAULT, BADGE_SCALE_MIN, BADGE_SCALE_MAX }',
   ].join('\n'),
 )(document, MARK, DEFAULT_COLOR, window)
 
@@ -366,37 +389,73 @@ const items = [
 }
 
 /*
- * 14b. The cap that keeps the tallest chip inside the collapsed header line. The host
- * pins that line to `24px + var(--dsh-content-font-delta)` and clips it, so the chip's
- * own line height is capped against the very variable the host publishes — read from
- * `body`, because that is the only place it is defined.
+ * 14b. The height the host gives a collapsed row's own line — `24px +
+ * var(--dsh-content-font-delta)` — read from `body`, because that is the only place the
+ * host publishes it. It is the number a chip is measured against: a chip taller than
+ * this line makes its row grow by exactly the difference, and a chip that fits leaves
+ * the row's own height alone.
  */
 {
-  const cap = () => ns.chipLineCap()
+  const delta = () => ns.hostFontDelta()
   bodyFontSize = 14
-  check('at the reader body size the cap is the header line less the chip frame', cap() === 'calc(21px + 0px)', String(cap()))
+  check('at the reader body size the host line is its own 24px', delta() === 0, String(delta()))
   bodyFontSize = 22
-  check('a larger reader body size raises the cap with it', cap() === 'calc(21px + 8px)', String(cap()))
+  check('a larger reader body size raises it with it', delta() === 8, String(delta()))
   bodyFontSize = 10
-  check('a smaller reader body size lowers the cap with it', cap() === 'calc(21px + -4px)', String(cap()))
+  check('a smaller reader body size lowers it with it', delta() === -4, String(delta()))
+  bodyFontSize = 14
   /*
    * The property is only there because the host publishes it. A platform (or a test
-   * double) without it must not turn into a chip with no line height at all.
+   * double) without it must not turn into a chip measured against a line that is not
+   * there — the room is simply not granted.
    */
   const withStyle = window.getComputedStyle
   window.getComputedStyle = () => ({ getPropertyValue: () => '' })
-  check('a missing host variable means no cap, not a broken one', cap() === 'none', String(cap()))
+  check('a missing host variable reads as unknown, not as zero', delta() === null, String(delta()))
   window.getComputedStyle = () => ({ getPropertyValue: () => 'not-a-length' })
-  check('a garbage host value is refused, not obeyed', cap() === 'none', String(cap()))
+  check('a garbage host value is refused, not obeyed', delta() === null, String(delta()))
   window.getComputedStyle = () => ({ getPropertyValue: () => '9999px' })
-  check('an absurd host value is refused too', cap() === 'none', String(cap()))
+  check('an absurd host value is refused too', delta() === null, String(delta()))
+  /*
+   * And the shape the host actually publishes: a `calc()`, which no parse of the custom
+   * property itself can turn into a number. The size the host sets as a plain length is
+   * what the delta is derived from then — the arithmetic of the host's own definition —
+   * because reading nothing here is exactly how an oversized chip went unmeasured.
+   */
+  window.getComputedStyle = () => ({
+    getPropertyValue(name) {
+      if (name === '--dsh-content-font-delta') return 'calc(var(--dsh-content-font-size,14px) - 14px)'
+      if (name === '--dsh-content-font-size') return String(bodyFontSize) + 'px'
+      return ''
+    },
+  })
+  bodyFontSize = 14
+  check('a calc() delta is derived from the size the host publishes', delta() === 0, String(delta()))
+  bodyFontSize = 22
+  check('and follows that size down to the pixel', delta() === 8, String(delta()))
+  bodyFontSize = 10
+  check('in both directions', delta() === -4, String(delta()))
+  window.getComputedStyle = () => ({ getPropertyValue: (name) => (name === '--dsh-content-font-delta' ? 'calc(var(--x) - 14px)' : '') })
+  check('a calc() with nothing behind it still reads as unknown', delta() === null, String(delta()))
   window.getComputedStyle = () => {
     throw new Error('no computed style here')
   }
-  check('an unreadable computed style is survivable', cap() === 'none', String(cap()))
+  check('an unreadable computed style reads as unknown', delta() === null, String(delta()))
   window.getComputedStyle = withStyle
   bodyFontSize = 14
-  /* Arithmetic the stylesheet then performs: the capped box plus the frame fits the line. */
+
+  /* The room itself: the box a chip draws, less the line it has to fit into. */
+  const room = (scale, linePx) => ns.badgeRoom([{ id: 'a', text: 'is', fontSize: 14 }], () => ({ ...ns.badgeDefaults(), scale, followText: false }), linePx)
+  check('a chip that fits the host line asks for no room', room(1, 24) === 0, String(room(1, 24)))
+  check('a chip scaled past it asks for exactly the difference', room(2, 24) === Math.ceil(ns.chipBoxHeight(2, ns.badgeDefaults()) - 24), String(room(2, 24)))
+  check('and the room grows with the badge', room(2.4, 24) > room(1.6, 24), String(room(1.6, 24)) + ' -> ' + String(room(2.4, 24)))
+  check('an unknown host line asks for nothing at all', room(2.4, null) === 0, String(room(2.4, null)))
+  check('a thicker frame is part of the box it has to fit', room(2, 24) < ns.badgeRoom([{ id: 'a', text: 'is', fontSize: 14 }], () => ({ ...ns.badgeDefaults(), scale: 2, followText: false, border: 'solid' }), 24), String(room(2, 24)))
+  /*
+   * The arithmetic the stylesheet then performs, and the reason a keyword's own text
+   * size never needs the row's height: the tallest chip that size can produce still fits
+   * the host's 24px line with its frame on, and the smallest stays readable.
+   */
   const tallest = 16 * (1 + (ns.chipScale(22) - 1) * 0.667)
   check('the tallest chip box fits the 24px header line with its frame', tallest + 2 <= 24, String(tallest + 2), '<=24')
   const smallest = 16 * (1 + (ns.chipScale(10) - 1) * 0.667)

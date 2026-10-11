@@ -20,11 +20,47 @@ const bundle = readFileSync(join(here, '..', 'client.js'), 'utf8')
 
 /**
  * Hook cells: a component that renders again must see the state it set, or a draft
- * that commits on blur could never be tested. One cursor per render pass, reset when
- * the page is rendered (see `renderPage`), which is what a mounted component sees.
+ * that commits on blur could never be tested. The cells belong to the component
+ * instance that called them — keyed by the component function and the element's `key`,
+ * the way React keys a fiber — so a hook's position depends on the component that
+ * called it and never on how many hooks the components above it happen to call.
  */
-let hookCursor = 0
-const hookCells = []
+const hookScopes = new Map()
+let hookCells = []
+let hookAt = 0
+
+function hookCellsFor(type, key) {
+  let perType = hookScopes.get(type)
+  if (perType === undefined) {
+    perType = new Map()
+    hookScopes.set(type, perType)
+  }
+  const id = String(key ?? 'default')
+  let cells = perType.get(id)
+  if (cells === undefined) {
+    cells = []
+    perType.set(id, cells)
+  }
+  return cells
+}
+
+/**
+ * Render one component inside its own hook cells. Every place the harness calls a
+ * component function itself goes through here, because a component called with the
+ * previous component's cells still in hand would read another one's state.
+ */
+function renderInScope(type, key, render) {
+  const outerCells = hookCells
+  const outerAt = hookAt
+  hookCells = hookCellsFor(type, key)
+  hookAt = 0
+  try {
+    return render()
+  } finally {
+    hookCells = outerCells
+    hookAt = outerAt
+  }
+}
 
 /** Minimal React: createElement, hooks, and the memo/Fragment surface used. */
 const React = {
@@ -35,13 +71,19 @@ const React = {
     return { type, props: props ?? {}, children }
   },
   useState(initial) {
-    const at = hookCursor
-    hookCursor += 1
-    if (hookCells.length <= at || hookCells[at] === undefined) {
-      hookCells[at] = typeof initial === 'function' ? initial() : initial
+    /*
+     * The cells are captured, not looked up again: a setter runs outside any render (a
+     * click handler, a blur), and the array in hand then is whichever component rendered
+     * last. React binds state to the fiber; this is the same binding.
+     */
+    const owned = hookCells
+    const at = hookAt
+    hookAt += 1
+    if (owned.length <= at || owned[at] === undefined) {
+      owned[at] = typeof initial === 'function' ? initial() : initial
     }
-    return [hookCells[at], (next) => {
-      hookCells[at] = typeof next === 'function' ? next(hookCells[at]) : next
+    return [owned[at], (next) => {
+      owned[at] = typeof next === 'function' ? next(owned[at]) : next
     }]
   },
   useRef(initial) {
@@ -494,7 +536,7 @@ check('installs a decoration effect', effects.some((entry) => String(entry.label
 const page = section()
 if (page !== undefined) {
   try {
-    const element = page.component({ renderSlot: () => null })
+    const element = renderInScope(page.component, 'section', () => page.component({ renderSlot: () => null }))
     check('settings page renders', element !== null && element !== undefined, 'ok')
     check('page opens with its own heading and intro', element.type === 'div' && element.props?.className === 'dsh-th-section', String(element.props?.className))
     // Exercise the interactive leaves: language, switches, add, remove, color.
@@ -667,15 +709,22 @@ check(
   JSON.stringify(chipNode?.props?.style?.['--dsh-th-chip-scale']),
 )
 /*
- * The chip also carries the tallest it may draw, computed from the host's own
- * `--dsh-content-font-delta`: a collapsed row's header line is a fixed height with
- * `contain: size layout`, so this is what stops the largest keyword's chip from being
- * clipped by the line it sits on.
+ * The line box the chip draws in, which the stylesheet caps the chip's own line height
+ * with. It is the taller of the chip's natural height and the host's own cap, computed
+ * from `--dsh-content-font-delta` — a collapsed row's header line is a fixed height with
+ * `contain: size layout`, so this is one of the two things that stop a chip from being
+ * clipped by the line it sits on. The other is the room the row is asked for, and a chip
+ * nobody scaled asks for none.
  */
 check(
-  'a chip carries the header-line cap it may not outgrow',
-  chipNode?.props?.style?.['--dsh-th-chip-line'] === 'calc(21px + 0px)',
+  'a chip carries the line box it draws in',
+  /^\d+(\.\d+)?px$/.test(String(chipNode?.props?.style?.['--dsh-th-chip-line'])),
   JSON.stringify(chipNode?.props?.style?.['--dsh-th-chip-line']),
+)
+check(
+  'a chip at its default size asks its row for no room',
+  runtime0().internals.rooms.size === 0 && (row.style.height ?? '') === '',
+  JSON.stringify({ rooms: runtime0().internals.rooms.size, height: row.style.height ?? '' }),
 )
 check('the eye stays outside the clipping chip group', findNode(badgeTree, (node) => node.props?.['data-dsh-th-eye'] === '1') !== undefined && chipGroup !== undefined, 'chips group ' + String(chipGroup !== undefined))
 
@@ -741,8 +790,7 @@ function storeSettings(changes) {
  * page's own literal buttons are in the tree either way.
  */
 function pageNodes(expand = false) {
-  hookCursor = 0
-  const tree = section().component({ renderSlot: () => null })
+  const tree = renderInScope(section().component, 'section', () => section().component({ renderSlot: () => null }))
   const nodes = []
   const collect = (node) => {
     if (node === null || node === undefined) return
@@ -754,10 +802,14 @@ function pageNodes(expand = false) {
     if (expand === true && typeof node.type === 'function') {
       /*
        * React hands a component its children through props; the stub keeps them on the
-       * element, so put them back where the component looks for them.
+       * element, so put them back where the component looks for them. The component is
+       * rendered inside its own hook cells, keyed the way React keys the instance.
        */
       const children = node.children ?? []
-      collect(node.type({ ...(node.props ?? {}), children: children.length > 1 ? children : children[0] }))
+      const rendered = renderInScope(node.type, node.props?.key, () =>
+        node.type({ ...(node.props ?? {}), children: children.length > 1 ? children : children[0] }),
+      )
+      collect(rendered)
       return
     }
     nodes.push(node)
@@ -773,6 +825,12 @@ function clickSettings(marker) {
   if (target === undefined) throw new Error('no settings control marked ' + marker)
   target.props.onClick({ preventDefault() {}, stopPropagation() {}, target: {} })
   runTimers()
+}
+
+/** Whether the page (or the dialog on it) actually offers the control a check is about. */
+function checkOffers(marker, name) {
+  const found = pageNodes(true).find((node) => node.props?.['data-dsh-th'] === marker)
+  check(name, found !== undefined && typeof found.props?.onClick === 'function', marker + ': ' + String(found !== undefined))
 }
 
 /** The chip elements the plugin last rendered into one row's badge container. */
@@ -1166,12 +1224,13 @@ check('the style is stored with the keyword', storedState().rows[0].bold === tru
   /*
    * The cap matters more than the number: a collapsed row's header line is a fixed
    * height with `contain: size layout`, so a chip that grew without bound would be
-   * clipped rather than read.
+   * clipped rather than read. A keyword's own text size never reaches past that line —
+   * the curve tops out at 20.8px against the host's 21px — which is what this holds.
    */
   check('the chip scale stays inside its bound at the largest size', Number(sizeChip()) <= 1.45, sizeChip())
   check(
-    'and at the largest size the chip still carries its header-line cap',
-    /^calc\(21px \+ -?\d+(\.\d+)?px\)$/.test(String(chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-line'])),
+    'and at the largest text size the chip’s whole box still fits the host line',
+    Number.parseFloat(String(chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-line'])) + 2 <= 24,
     String(chipsFor(row)[0]?.props?.style?.['--dsh-th-chip-line']),
   )
   for (let step = 0; step < 20; step += 1) {
@@ -1403,6 +1462,217 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
     }
   } catch (error) {
     check('the probe write checks run', false, String(error && error.stack ? error.stack : error))
+  }
+}
+
+/*
+ * 24. The badge editor. The chip is the part of this plugin a reader looks at
+ * constantly, and the editor is the only place its look can be changed — so what is
+ * asserted here is the whole round trip: the dialog the two buttons open, the preview
+ * inside it built by the transcript's own chip builder, a template applied in one
+ * click, one keyword's own look overriding the shared one, the room a scaled-up chip
+ * asks its row for (and the row getting its own height back), and the ways back to the
+ * default. It runs last because it leaves the store holding its own keywords.
+ */
+{
+  try {
+    storeSettings({
+      rows: [
+        { id: 'b-is', text: 'is', color: '#dc2626' },
+        { id: 'b-and', text: 'and', color: '#35c047' },
+      ],
+      muted: [],
+      badge: undefined,
+      badgeTemplates: undefined,
+      /* The chips the editor edits are the folded row's, so that switch has to be on. */
+      chipsWhenCollapsed: true,
+    })
+    runtime0().pass()
+    /* The room is the folded row's problem: an open row's height is its own content's. */
+    row.removeAttribute('data-expanded')
+    header.removeAttribute('data-open')
+    runtime0().pass()
+    const marker = (name) => pageNodes(true).find((node) => node.props?.['data-dsh-th'] === name)
+    const markers = () =>
+      pageNodes(true)
+        .map((node) => node.props?.['data-dsh-th'])
+        .filter((name) => typeof name === 'string')
+    const chipStyle = (index = 0) => chipsFor(row)[index]?.props?.style ?? {}
+    const stateLine = () => String(marker('badge-state')?.children?.[0] ?? '')
+    const inside = (node, className) => {
+      const found = []
+      const walk = (current) => {
+        if (current === null || current === undefined || typeof current !== 'object') return
+        if (Array.isArray(current)) {
+          for (const child of current) walk(child)
+          return
+        }
+        if (current.props?.className === className) found.push(current)
+        walk(current.children)
+        walk(current.props?.children)
+      }
+      walk(node)
+      return found
+    }
+
+    /* The shared badge, opened from the heading of the keyword list. */
+    checkOffers('badge-shared', 'the keyword heading offers the shared badge')
+    clickSettings('badge-shared')
+    check('the badge editor opens as a modal dialog', markers().filter((name) => name === 'badge-dialog').length === 1, JSON.stringify(markers().filter((name) => name.startsWith('badge-'))))
+    const offered = markers()
+    check(
+      'it carries a preview, templates, size, colours, style and texture',
+      [
+        'badge-preview',
+        'badge-tpl-default',
+        'badge-tpl-glow',
+        'badge-size',
+        'badge-size-up',
+        'badge-size-down',
+        'badge-scale',
+        'badge-follow',
+        'badge-well-bg',
+        'badge-well-ink',
+        'badge-well-frame',
+        'badge-shape-rounded',
+        'badge-stroke-hairline',
+        'badge-shadow-none',
+        'badge-upload',
+        'badge-template-new',
+        'badge-reset',
+        'badge-done',
+      ].every((name) => offered.includes(name)),
+      JSON.stringify(offered.filter((name) => name.startsWith('badge-'))),
+    )
+    const previewChips = inside(marker('badge-preview'), 'dsh-th-badge')
+    check(
+      'the preview draws the transcript’s own chip inside the row it will sit on',
+      previewChips.length === 1 && String(previewChips[0].props.style['--dsh-th-chip-scale']) === '1' && inside(marker('badge-preview'), 'dsh-th-preview-title').length === 0,
+      JSON.stringify(previewChips.length),
+    )
+    check('the editor opens on the shared look, named as the whole list’s', stateLine().length > 0, JSON.stringify(stateLine()))
+    const sharedLine = stateLine()
+
+    /* One click puts a template on, and the transcript follows. */
+    clickSettings('badge-tpl-pill')
+    check('a template writes its look into the stored badge', storedState().badge?.shape === 'pill', JSON.stringify(storedState().badge))
+    check('and the transcript’s chip is drawn with it', chipStyle()['--dsh-th-radius'] === '999px', JSON.stringify(chipStyle()))
+
+    /* Size: the stepper walks to its own ceiling, and the row is asked for the room. */
+    for (let step = 0; step < 30; step += 1) {
+      if (marker('badge-size-up')?.props?.disabled === true) break
+      clickSettings('badge-size-up')
+    }
+    check('the badge size stops at its own ceiling', storedState().badge?.scale === 2.4, JSON.stringify(storedState().badge?.scale))
+    check('a chip at the largest badge size draws larger than its keyword implies', Number(chipStyle()['--dsh-th-chip-scale']) > 1.5, String(chipStyle()['--dsh-th-chip-scale']))
+    check('it draws in a line box taller than the host’s own line', Number.parseFloat(String(chipStyle()['--dsh-th-chip-line'])) > 21, String(chipStyle()['--dsh-th-chip-line']))
+    check(
+      'the row is given the room that chip needs',
+      runtime0().internals.rooms.size >= 1 && String(row.style.height ?? '').startsWith('calc(24px'),
+      JSON.stringify({ rooms: runtime0().internals.rooms.size, height: row.style.height ?? '' }),
+    )
+    check(
+      'and the disclosure line it sits on is raised with it',
+      [...runtime0().internals.rooms.keys()].some((element) => element.getAttribute?.('data-disclosure-row') === ''),
+      String(runtime0().internals.rooms.size),
+    )
+    clickSettings('badge-reset')
+    check('reset returns the shared badge to the default look', JSON.stringify(storedState().badge) === JSON.stringify(runtime0().internals.badgeDefaults()), JSON.stringify(storedState().badge))
+    check(
+      'and the row gets its own height back',
+      runtime0().internals.rooms.size === 0 && (row.style.height ?? '') === '',
+      JSON.stringify({ rooms: runtime0().internals.rooms.size, height: row.style.height ?? '' }),
+    )
+    clickSettings('badge-done')
+    check('done closes the dialog', marker('badge-dialog') === undefined, JSON.stringify(markers().filter((name) => name.startsWith('badge-'))))
+
+    /* One keyword's own look, opened from inside its style panel. */
+    clickSettings('style-menu')
+    checkOffers('badge-open', 'the style panel offers this keyword’s badge')
+    clickSettings('badge-open')
+    const followsLine = stateLine()
+    check('the editor opens saying the keyword follows the shared badge', followsLine.length > 0 && followsLine !== sharedLine, JSON.stringify(followsLine))
+    marker('badge-well-ink').props.onChange({ target: { value: '#123456' } })
+    runTimers()
+    check('a colour picked in the editor becomes this keyword’s own badge', storedState().rows?.[0]?.badge?.ink === '#123456', JSON.stringify(storedState().rows?.[0]?.badge))
+    check('the shared badge is left alone by it', storedState().badge?.ink === 'theme', JSON.stringify(storedState().badge?.ink))
+    check('the transcript’s chip carries the keyword’s own ink', chipStyle()['--dsh-th-ink'] === '#123456', JSON.stringify(chipStyle()))
+    check('and the second keyword still follows the shared badge', chipStyle(1)['--dsh-th-ink'] === undefined, JSON.stringify(chipStyle(1)))
+    check('the editor now says this keyword has its own', stateLine() !== followsLine && stateLine().length > 0, JSON.stringify(stateLine()))
+
+    /* Templates are the reader's own, and they go away when deleted. */
+    clickSettings('badge-template-new')
+    marker('badge-template-name').props.onChange({ target: { value: '我的' } })
+    clickSettings('badge-template-save')
+    check(
+      'a saved template keeps the look it was saved from',
+      storedState().badgeTemplates?.[0]?.name === '我的' && storedState().badgeTemplates?.[0]?.spec?.ink === '#123456',
+      JSON.stringify(storedState().badgeTemplates),
+    )
+    check('and it is offered beside the built-in ones', markers().includes('badge-tpl-saved'), JSON.stringify(markers().filter((name) => name.startsWith('badge-tpl'))))
+    clickSettings('badge-tpl-delete')
+    check('deleting it removes it from the store', (storedState().badgeTemplates ?? []).length === 0, JSON.stringify(storedState().badgeTemplates))
+
+    /* Resetting a keyword's own look sends it back to the shared one. */
+    clickSettings('badge-reset')
+    check('resetting a keyword clears its own badge', storedState().rows?.[0]?.badge === null, JSON.stringify(storedState().rows?.[0]?.badge))
+    check('and its chip follows the shared look again', chipStyle()['--dsh-th-ink'] === undefined, JSON.stringify(chipStyle()))
+    clickSettings('badge-done')
+
+    /* A texture is a layer of the chip, and a stored badge is sanitized on the way in. */
+    const internals = runtime0().internals
+    const textured = internals.buildChip(
+      { id: 'tex-chip', text: 'is', count: 2, color: '#dc2626', fontSize: 14 },
+      { ...internals.badgeDefaults(), texture: { id: 'tex1', src: 'data:image/png;base64,AAAA', fit: 'cover', alpha: 0.5 } },
+      { labels: { chipMute: 'mute', chipUnmute: 'unmute' }, capPx: null },
+    )
+    check(
+      'a texture rides the chip as a layer of its own',
+      String(textured.props.style['--dsh-th-tex']).startsWith('url("data:image/png') &&
+        textured.props.style['--dsh-th-tex-size'] === '100% 100%' &&
+        textured.props.style['--dsh-th-tex-repeat'] === 'no-repeat' &&
+        textured.props.style['--dsh-th-tex-alpha'] === '0.5',
+      JSON.stringify(textured.props.style),
+    )
+    const screened = internals.screenBadge({ scale: 99, shape: 'glow', border: 'thick', bg: 'url(x)', ink: '#ABCDEF', frame: 'none', texture: { src: 'http://example.com/x.png' } })
+    check(
+      'a stored badge is clamped, whitelisted and stripped of anything remote',
+      screened !== null &&
+        screened.scale === 2.4 &&
+        screened.shape === 'rounded' &&
+        screened.border === 'hairline' &&
+        screened.bg === 'theme' &&
+        screened.ink === '#abcdef' &&
+        screened.frame === 'keyword' &&
+        screened.texture === null,
+      JSON.stringify(screened),
+    )
+    check(
+      'a badge nobody wrote reads as no opinion at all',
+      internals.screenBadge(null) === null && internals.screenBadge('pill') === null && internals.screenTemplate('x', 0) === null,
+      JSON.stringify([internals.screenBadge('pill'), internals.screenTemplate('x', 0)]),
+    )
+    /*
+     * The name inside a chip previews the word's own text style — including its size — so
+     * the badge's own scale has to carry it too: a chip drawn twice as large with its name
+     * left at the reader's size reads as a bug, not as a setting. A badge left alone has to
+     * keep that size exactly, word for word.
+     */
+    const nameOf = (element) => element.children[0]?.props?.style?.fontSize
+    const scaled = internals.buildChip(
+      { id: 'scaled', text: 'is', count: 2, color: '#dc2626', fontSize: 18 },
+      { ...internals.badgeDefaults(), scale: 2, followText: false },
+      { labels: { chipMute: 'mute', chipUnmute: 'unmute' } },
+    )
+    check('a scaled badge draws its name at the badge’s size too', nameOf(scaled) === '36.0px', JSON.stringify(nameOf(scaled)))
+    const untouched = internals.buildChip(
+      { id: 'plain', text: 'is', count: 2, color: '#dc2626', fontSize: 18 },
+      internals.badgeDefaults(),
+      { labels: { chipMute: 'mute', chipUnmute: 'unmute' } },
+    )
+    check('and a badge nobody scaled leaves the name at the word’s own size', nameOf(untouched) === '18px', JSON.stringify(nameOf(untouched)))
+  } catch (error) {
+    check('the badge editor checks run', false, String(error && error.stack ? error.stack : error))
   }
 }
 

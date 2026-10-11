@@ -30,7 +30,9 @@ check('the two locales are actually different texts', meta(zh).title !== meta(en
 check('the card title matches the Chinese locale', meta(zh).title === text(pkg.meta.title), String(meta(zh).title) + ' vs ' + String(pkg.meta.title))
 check('the card description matches the Chinese locale', meta(zh).description === text(pkg.meta.description), 'equal: ' + String(meta(zh).description === text(pkg.meta.description)))
 check('the description mentions what the plugin now does', /徽章/.test(text(meta(zh).description)) && /完整词/.test(text(meta(zh).description)) && /颜色/.test(text(meta(zh).description)) && /字号/.test(text(meta(zh).description)), text(meta(zh).description).slice(0, 40))
+check('the Chinese description names the badge editor too', /徽章设置/.test(text(meta(zh).description)) && /纹理/.test(text(meta(zh).description)) && /模板/.test(text(meta(zh).description)), text(meta(zh).description).slice(-60))
 check('the English description names the same features', /chip/i.test(text(meta(en).description)) && /colour|color/i.test(text(meta(en).description)) && /size/i.test(text(meta(en).description)), text(meta(en).description).slice(0, 40))
+check('the English description names the badge editor too', /badge settings/i.test(text(meta(en).description)) && /texture/i.test(text(meta(en).description)) && /templates?/i.test(text(meta(en).description)), text(meta(en).description).slice(-60))
 const version = /const VERSION = '([^']+)'/.exec(client)
 check('the client version tag matches package.json', version !== null && version[1] === pkg.version, String(version?.[1]) + ' vs ' + String(pkg.version))
 
