@@ -5,6 +5,8 @@ section in Settings.
 
 [中文说明 →](README.zh.md)
 
+[![DSH Market](https://raw.githubusercontent.com/2BingLing/dsh-market/master/assets/readme/badge-listed-en.svg)](https://dsh.market/) [![npm version](https://img.shields.io/npm/v/@yokira404/dsh-thinking-highlight?style=flat-square&color=cb3837&logo=npm)](https://www.npmjs.com/package/@yokira404/dsh-thinking-highlight) [![npm downloads](https://img.shields.io/npm/dm/@yokira404/dsh-thinking-highlight?style=flat-square&logo=npm)](https://www.npmjs.com/package/@yokira404/dsh-thinking-highlight) [![license](https://img.shields.io/npm/l/@yokira404/dsh-thinking-highlight?style=flat-square)](LICENSE)
+
 ![Count chips and keyword highlighting in a thinking row](docs/reasoning.png)
 
 - **Count chips** — every thinking row shows `keyword × n` right after its title, one chip per keyword, so you

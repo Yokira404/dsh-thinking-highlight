@@ -2,6 +2,8 @@
 
 [English →](README.md)
 
+[![DSH Market](https://raw.githubusercontent.com/2BingLing/dsh-market/master/assets/readme/badge-listed-zh.svg)](https://dsh.market/) [![npm 版本](https://img.shields.io/npm/v/@yokira404/dsh-thinking-highlight?style=flat-square&color=cb3837&logo=npm)](https://www.npmjs.com/package/@yokira404/dsh-thinking-highlight) [![npm 下载量](https://img.shields.io/npm/dm/@yokira404/dsh-thinking-highlight?style=flat-square&logo=npm)](https://www.npmjs.com/package/@yokira404/dsh-thinking-highlight) [![许可](https://img.shields.io/npm/l/@yokira404/dsh-thinking-highlight?style=flat-square)](LICENSE)
+
 DSH 插件：统计思考行（思维链）里关键词出现的次数并按词标红，设置在左侧有独立分区。
 
 ![思考行上的计数徽章与标红](docs/reasoning.png)
