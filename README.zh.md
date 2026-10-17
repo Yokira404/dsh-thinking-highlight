@@ -111,8 +111,13 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
   折叠预览之前：折叠时整个头部是固定高度的盒子，挂在块级层上会掉到行下面去。头部块靠它的
   `[data-disclosure-row]` 那一行来找，而不是靠「行的第一个子元素」：模型还在流式输出时，宿主会在头部块
   **之前**渲染一个视觉隐藏的「正在思考」状态 span，徽章落进那个 1px 盒子就等于没人看得见。
-- 展开的思维链在**披露块内部**、紧跟标题行之后找（`DisclosureRow` 就是这么渲染的：`[div[data-disclosure-row],
-  open && children]`）。已经完结、从未在流式中被看到过的行也必须这样找得到，否则展开它永远不会上色。
+- 展开的思维链在**头部之后**找：扁平的 `DisclosureRow` 里它是 `[data-disclosure-row]` 那一行的下一个兄弟，
+  而 DSH 0.2.1 起标题行外面多套了一层 `[data-disclosure-header]`，正文成了这一块的下一个兄弟。只读标题行自己的
+  下一个兄弟，正是 0.2.1 下正文彻底找不到的原因（这一行现在独自待在头部块里，那个兄弟是 null）；两种嵌套说
+  的其实是同一件事——「头部之后的第一个元素」——所以按顺序依次尝试。
+- DSH 官方的思维链翻译插件占用的是正文那个 slot，渲染成 `[data-cot-translation] > (工具条, 正文)`。插件只给
+  正文上色、也只按正文计数：工具条上的按钮、转圈和失败提示是界面，不是思维链；读者在译文和原文之间切换时，
+  标记和数字都跟着屏幕上的那份文字走。
 - 徽章组**完全不参与收缩**（旁边的折叠预览是 `flex: auto`），所以它有定宽上限、只裁自己。
 - 计数用的文本**只排除徽章组**，高亮 span 要算进来：两者都带标记，一律排除会让数字在第一次标红后掉到 0，
   连徽章一起消失；反过来连徽章一起数，就是自己数自己，数字每轮往上爬一格。
@@ -145,6 +150,11 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 - 插件按当前 DSH 渲染出的 `[data-variant="think"]` 行来装饰。DSH 若改动这些内部结构，这里可能需要跟着改；
   查找失败时插件只会「少做一点」，不会把对话弄坏。`evidence/host-shape.mjs` 按安装版的真实结构建模，并顺带
   断言它依赖的那几个标记仍然存在于应用自己的 bundle 里——DSH 改名会变成一条失败的测试，而不是安静地不工作。
+- DSH 0.2.1 把标题行挪进了 `[data-disclosure-header]` 块里，比原来深一层。1.4.0 恰好找不到这个形状（徽章照常
+  显示，思维链却一直不上色）；现在正文查找两种嵌套都认，`host-shape.mjs` 也会断言安装版仍在渲染这个新的头部块，
+  再改一次就会先有一条测试失败。
+- 兼容 DSH 官方的思维链翻译插件：它把正文包进 `[data-cot-translation]`，插件就给译文（切回原文时是原文）上色和
+  计数，工具条不碰。折叠的行没有正文，仍然按整段原文计数。
 - 字号区间（10–22px）不是我定的，是抄宿主主题插件的正文尺寸定义（`min(10).max(22).default(14)`）：插件里量不到
   宿主的 schema，所以 `host-shape.mjs` 也断言这两个数字仍在那份 bundle 里——DSH 改了区间，会先有一条测试失败。
 - 抑制是按**关键词**生效的（同一个词在所有行一起停），逐行控制是那只眼睛。
@@ -157,10 +167,10 @@ node evidence/install.mjs desktop        # 或传入其它 profile 名
 
 ```bash
 node evidence/selftest.mjs         #  71 项：切分/还原/计数/大小写/颜色/字号/完整词边界
-node evidence/client-harness.mjs   # 177 项：浏览器半边在桩宿主里真的跑起来
-node evidence/css-check.mjs        #  31 项：样式表字面量（括号、徽章/行/面板/弹窗规则）
+node evidence/client-harness.mjs   # 190 项：浏览器半边在桩宿主里真的跑起来
+node evidence/css-check.mjs        #  33 项：样式表字面量（括号、徽章/行/面板/弹窗规则）
 node evidence/locale-check.mjs     #  11 项：包 meta、两个语言文件与版本号互相对得上
-node evidence/host-shape.mjs       #  30 项：安装版的真实行结构与正文字号区间，以及它在应用 bundle 里的标记
+node evidence/host-shape.mjs       #  40 项：安装版的真实行结构与正文字号区间，以及它在应用 bundle 里的标记
 node evidence/e2e-bundle.mjs <带 token 的页面地址> @yokira404/dsh-thinking-highlight <cookie>
 ```
 

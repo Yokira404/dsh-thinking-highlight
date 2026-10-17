@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     /* ───────────────────────────── constants ───────────────────────────── */
 
     const NS = 'dsh-thinking-highlight'
-    const VERSION = '1.4.0'
+    const VERSION = '1.4.1'
     const STORAGE_KEY = 'dsh-thinking-highlight.state.v1'
     const ROW_SELECTOR = '[data-variant="think"]'
     const BODY_CLASS = 'dsh-th-body'
@@ -1366,33 +1366,41 @@ window.__ModuleLoader__.load({
       if (own !== null && own !== undefined && own.isConnected !== false) return own
       const header = headerRowOf(root)
       if (header === null || header === undefined) return null
-      const line = header.querySelector('[data-disclosure-row]')
-      const inside = line === null || line === undefined ? header.children?.[1] : line.nextElementSibling
-      if (
-        inside !== null &&
-        inside !== undefined &&
-        inside.nodeType === 1 &&
-        inside.hasAttribute(MARK) !== true &&
-        inside.contains(header) !== true
-      ) {
-        inside.classList.add(BODY_CLASS)
-        return inside
-      }
       /*
-       * Another layout may keep the body beside the disclosure block instead of
-       * inside it. Only a following sibling qualifies: anything before the header is
-       * the status label or a leading glyph, never the chain of thought.
+       * Where the expanded content sits depends on how the host nests its disclosure,
+       * and DSH 0.2.1 added a level:
+       *
+       *   0.2.1     [data-open] > [data-disclosure-header] > [data-disclosure-row]
+       *             [data-open] > body                     the body is the header
+       *                                                    block's next sibling
+       *   earlier   [data-open] > [data-disclosure-row]
+       *             [data-open] > body                     the body is the line's next
+       *                                                    sibling
+       *
+       * Reading only `line.nextElementSibling` is what lost the body in 0.2.1: the
+       * line now sits alone inside the header block, so that sibling is null and the
+       * chain of thought was never marked. Both nestings describe the same thing —
+       * the first element after the header that is not ours — so the candidates are
+       * tried in that order instead of assuming one of them.
        */
-      const after = header.nextElementSibling
-      if (
-        after !== null &&
-        after !== undefined &&
-        after.nodeType === 1 &&
-        root.contains(after) === true &&
-        after.hasAttribute(MARK) !== true
-      ) {
-        after.classList.add(BODY_CLASS)
-        return after
+      const line = header.querySelector('[data-disclosure-row]')
+      const candidates = []
+      if (line !== null && line !== undefined) {
+        candidates.push(line.nextElementSibling)
+        const block = line.parentElement
+        if (block !== null && block !== undefined && block !== header) candidates.push(block.nextElementSibling)
+      }
+      /* The older shapes: the second child of the block, or the block's own sibling. */
+      candidates.push(line === null || line === undefined ? header.children?.[1] : undefined)
+      candidates.push(header.nextElementSibling)
+      for (const candidate of candidates) {
+        if (candidate === null || candidate === undefined) continue
+        if (candidate.nodeType !== 1) continue
+        if (candidate.hasAttribute(MARK) === true) continue
+        if (candidate.contains(header) === true) continue
+        if (root.contains(candidate) !== true) continue
+        candidate.classList.add(BODY_CLASS)
+        return candidate
       }
       return null
     }
@@ -2014,6 +2022,32 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * DSH's own reasoning-translation plugin claims the reasoning body slot and
+     * renders `[data-cot-translation] > (toolbar, rendered reasoning)`. The wrapper is
+     * the only thing that says so; without the plugin the body is the reasoning.
+     */
+    function translationWrapperOf(body) {
+      if (body === null || body === undefined || typeof body.querySelector !== 'function') return null
+      const wrapper = body.querySelector('[data-cot-translation]')
+      return wrapper === null || wrapper === undefined ? null : wrapper
+    }
+
+    /**
+     * The element that actually carries the reasoning text inside a body.
+     *
+     * The translation toolbar is chrome — "view translation", the spinner, the retry
+     * action — so neither its words nor its buttons may be marked, and the string
+     * behind the wrapper is the translated one, not the row's original. Its last
+     * element child is the rendered reasoning; the body itself is the reasoning when
+     * no wrapper is there.
+     */
+    function reasoningRootOf(body) {
+      const wrapper = translationWrapperOf(body)
+      if (wrapper === null) return body
+      return wrapper.lastElementChild ?? body
+    }
+
+    /**
      * The reasoning text the host is holding, whole, even while the row is folded.
      *
      * A collapsed row renders no chain of thought at all — the host mounts the body
@@ -2101,7 +2135,17 @@ window.__ModuleLoader__.load({
        */
       const domText = unmarkedText(root)
       const folded = foldedTextOf(root)
-      const counted = folded === null ? domText : folded
+      /*
+       * With DSH's own reasoning translation installed, the open body shows the
+       * translated string rather than the row's own `text` prop. Counting the original
+       * there would leave every chip disagreeing with the marks the reader can see, so
+       * a translated body is counted from itself; a folded row has no body at all and
+       * keeps counting the whole chain.
+       */
+      const body = bodyOf(root)
+      const wrapper = translationWrapperOf(body)
+      const counted =
+        wrapper === null ? (folded === null ? domText : folded) : unmarkedText(reasoningRootOf(body))
       /* The DOM text stays in the key: the preview appearing or leaving is a change. */
       const text = counted + '\u0000' + domText
       const patternChanged = entry.patternKey !== options.patternKey
@@ -2183,7 +2227,6 @@ window.__ModuleLoader__.load({
        */
       if (expanded === true && options.liftOnExpand === true) liftForRow(root)
 
-      const body = bodyOf(root)
       if (body === null) {
         /* Collapsed: React unmounted the chain-of-thought, so the next expansion
            must re-wrap the freshly mounted nodes. */
@@ -2201,13 +2244,14 @@ window.__ModuleLoader__.load({
        * streams, React re-renders the header (updating the row text above) far
        * more often than the body, and this check is what keeps that cheap.
        */
-      const bodyText = unmarkedText(body)
+      const reasoning = reasoningRootOf(body)
+      const bodyText = unmarkedText(reasoning)
       const bodyKey = entry.bodyKey
       if (typeof bodyKey === 'string' && bodyKey === bodyText && entry.enabled === options.enabled) return
 
       unwrapBody(body)
       /* Whatever the body holds *now* is the text the marks were rebuilt from. */
-      entry.bodyKey = unmarkedText(body)
+      entry.bodyKey = unmarkedText(reasoning)
       entry.sample = undefined
       setHighlight(root, entry.highlighted === true && options.enabled === true)
       /*
@@ -2226,7 +2270,13 @@ window.__ModuleLoader__.load({
       const active = options.items.filter((item) => item.muted !== true)
       const tintFor = (word) => toTint(colors[keyOf(word)] ?? DEFAULT_COLOR, TINT_ALPHA)
       const styleFor = (word) => markStyle(styles[keyOf(word)])
-      const stack = [body]
+      /*
+       * The walk starts at the reasoning itself, not at the body: DSH's reasoning
+       * translation wraps the text in a toolbar plus the rendered chain, and the
+       * toolbar's own words ("view translation", "retry") are chrome that must stay
+       * out of both the marks and the counts.
+       */
+      const stack = [reasoning]
       while (stack.length > 0) {
         const element = stack.pop()
         /*

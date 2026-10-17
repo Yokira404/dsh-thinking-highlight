@@ -126,9 +126,15 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   The header block is found by its `[data-disclosure-row]` line, not by being the row's first element: while
   the model is still streaming the host renders a visually-hidden "running" status span before it, and a chip
   set parked in that 1 px box is a chip set nobody can see.
-- The expanded chain of thought is looked for *inside* the disclosure block, right after the header line,
-  because that is where `DisclosureRow` renders it (`[div[data-disclosure-row], open && children]`). A settled
-  row that was never seen streaming has to be found this way too, or expanding it can never highlight anything.
+- The expanded chain of thought is looked for *after the header*: DSH renders it as the next sibling of the
+  `[data-disclosure-row]` line in a flat `DisclosureRow`, and — since 0.2.1 — as the next sibling of the
+  `[data-disclosure-header]` block that now wraps that line. Reading only the line's own sibling is what made
+  0.2.1 lose the body entirely (the line sits alone inside the header block, so that sibling is null); both
+  nestings describe the same "first element after the header", so the lookup tries them in turn.
+- DSH's own reasoning translation claims the reasoning body slot and renders
+  `[data-cot-translation] > (toolbar, rendered reasoning)`. The plugin decorates and counts the rendered
+  reasoning only — the toolbar's button, spinner and failure text are chrome, not chain of thought — and when
+  the reader flips the view, the marks and the numbers follow whichever text is on screen.
 - Nothing in the chip set may shrink (the collapsed preview beside it is `flex: auto`), which is why the chip
   group has a fixed width cap and clips only itself.
 - Counting is text-accurate: the chip set is excluded, the highlight spans are not — otherwise the numbers
@@ -174,6 +180,14 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
   those internals can require an update here; when a lookup fails the plugin degrades to doing less, never to
   breaking the transcript. `evidence/host-shape.mjs` models the installed markup and also asserts the markers
   it depends on are still present in the app's own bundle, so a DSH rename fails a test instead of going quiet.
+- DSH 0.2.1 moved the reasoning line into a `[data-disclosure-header]` block, one level deeper than before.
+  That is the shape 1.4.0 could not find (chips drew, the chain of thought stayed unmarked); the body lookup
+  now handles both nestings, and `host-shape.mjs` asserts the installed disclosure still renders the new
+  header block so a further change fails a test.
+- DSH's official reasoning-translation plugin is supported: it wraps the body in `[data-cot-translation]`,
+  and the plugin marks and counts the translated text (or the original, when the reader switches back) while
+  leaving the toolbar alone. Rows that are folded still count the whole original chain, because a folded row
+  has no body at all.
 - The 10–22 px size range is not the plugin's own: it is the host theme plugin's content font size
   (`min(10).max(22).default(14)`). The plugin cannot read the host's schema at runtime, so `host-shape.mjs`
   asserts those two numbers are still in that bundle — a DSH release that changes the range fails a test first.
@@ -190,10 +204,10 @@ rendered DOM instead — by splitting text nodes, never by replacing them:
 
 ```bash
 node evidence/selftest.mjs         #  71 checks: splitting, undoing, counting, case, colour, size, whole-word edges
-node evidence/client-harness.mjs   # 177 checks: the browser half really runs, against a stubbed host
-node evidence/css-check.mjs        #  31 checks: the stylesheet literal (braces, chip/row/panel/editor rules)
+node evidence/client-harness.mjs   # 190 checks: the browser half really runs, against a stubbed host
+node evidence/css-check.mjs        #  33 checks: the stylesheet literal (braces, chip/row/panel/editor rules)
 node evidence/locale-check.mjs     #  11 checks: package meta, both locale files and the version tag agree
-node evidence/host-shape.mjs       #  30 checks: the installed row markup, plus its markers in the app bundle
+node evidence/host-shape.mjs       #  40 checks: the installed row markup, plus its markers in the app bundle
 node evidence/e2e-bundle.mjs <page-url-with-token> @yokira404/dsh-thinking-highlight <cookie>
 ```
 

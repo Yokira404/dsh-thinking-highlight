@@ -268,7 +268,11 @@ class StubText {
     this.isConnected = true
   }
   remove() {
-    if (this.parentNode) this.parentNode.childNodes.splice(this.parentNode.childNodes.indexOf(this), 1)
+    /* Real DOM: removing a node that is not in its parent is a no-op. `splice(-1)`
+       would silently eat the parent's last child instead. */
+    const at = this.parentNode === null ? -1 : this.parentNode.childNodes.indexOf(this)
+    if (at >= 0) this.parentNode.childNodes.splice(at, 1)
+    this.parentNode = null
     this.isConnected = false
   }
 }
@@ -304,6 +308,12 @@ class StubElement {
     return this.text
   }
   set textContent(value) {
+    /* Real DOM detaches the old children; leaving their `parentNode` pointing here
+       made a later `remove()` on one of them splice the wrong node out. */
+    for (const node of this.childNodes) {
+      node.parentNode = null
+      node.isConnected = false
+    }
     this.childNodes = []
     this.appendChild(new StubText(String(value)))
   }
@@ -333,6 +343,9 @@ class StubElement {
   }
   get firstElementChild() {
     return this.childNodes.find((node) => node.nodeType === 1) ?? null
+  }
+  get lastElementChild() {
+    return [...this.childNodes].reverse().find((node) => node.nodeType === 1) ?? null
   }
   /** Element children only, as the platform collection the plugin indexes into. */
   get children() {
@@ -433,7 +446,8 @@ class StubElement {
     return false
   }
   remove() {
-    if (this.parentNode) this.parentNode.removeChild(this)
+    /* Real DOM: a node that is already detached removes nothing. */
+    if (this.parentNode !== null && this.parentNode.childNodes.includes(this)) this.parentNode.removeChild(this)
     this.isConnected = false
   }
   click() {
@@ -1694,6 +1708,149 @@ check('flipping back restores the Chinese label', chipTitle().includes('点击�
   } catch (error) {
     check('the badge editor checks run', false, String(error && error.stack ? error.stack : error))
   }
+}
+
+// 25. DSH 0.2.1 nested its disclosure header, and the body moved with it.
+{
+  /*
+   * The shipped disclosure changed shape in DSH 0.2.1:
+   *
+   *   before   [data-open] > [data-disclosure-row], body
+   *   0.2.1    [data-open] > [data-disclosure-header] > [data-disclosure-row]
+   *            [data-open] > body
+   *
+   * The plugin read the body as the text line's next sibling, which 0.2.1 made
+   * null — so every expanded row found no body at all and the chain of thought
+   * went unmarked while the chips still drew. These checks build the 0.2.1 shape,
+   * with the nested TextShimmer the shipped title uses, and then DSH's own
+   * reasoning-translation wrapper on top of it.
+   */
+  const newHostRow = ({ expanded, bodyText }) => {
+    const root = new StubElement('div')
+    root.setAttribute('data-variant', 'think')
+    const block = new StubElement('div')
+    if (expanded === true) {
+      root.setAttribute('data-expanded', '')
+      block.setAttribute('data-open', '')
+    }
+    const headerBlock = new StubElement('div')
+    headerBlock.setAttribute('data-disclosure-header', '')
+    const line = new StubElement('div')
+    line.setAttribute('data-disclosure-row', '')
+    line.appendChild(new StubElement('span'))
+    const shimmer = new StubElement('span')
+    shimmer.setAttribute('data-shimmer', '')
+    const contentLine = new StubElement('span')
+    const titleShimmer = new StubElement('span')
+    const title = new StubElement('span')
+    title.textContent = '已完成思考'
+    titleShimmer.appendChild(title)
+    const separator = new StubElement('span')
+    separator.setAttribute('data-shimmer-decoration', '')
+    const summary = new StubElement('span')
+    summary.textContent = '先看提示词，但不要急'
+    contentLine.appendChild(titleShimmer)
+    contentLine.appendChild(separator)
+    contentLine.appendChild(summary)
+    shimmer.appendChild(contentLine)
+    line.appendChild(shimmer)
+    headerBlock.appendChild(line)
+    block.appendChild(headerBlock)
+    const thinkBody = new StubElement('div')
+    thinkBody.className = 'thinkBody'
+    if (expanded === true) {
+      const paragraph = new StubElement('p')
+      paragraph.appendChild(new StubText(bodyText))
+      thinkBody.appendChild(paragraph)
+      block.appendChild(thinkBody)
+    }
+    root.appendChild(block)
+    body.appendChild(root)
+    return { root, block, headerBlock, line, contentLine, summary, thinkBody }
+  }
+
+  const hitsIn = (element) => element.querySelectorAll('[data-dsh-th="hit"]').length
+  /* The earlier sections left English keywords behind; this section counts its own. */
+  storeSettings({
+    rows: [
+      { id: 'kw1', text: '提示词', color: '#dc2626' },
+      { id: 'kw2', text: '但', color: '#2563eb' },
+    ],
+  })
+
+  /* Expanded: the body is the header block's next sibling in 0.2.1. */
+  const nested = newHostRow({ expanded: true, bodyText: '提示词与但，提示词再一次。' })
+  runtime0().pass()
+  check(
+    '0.2.1’s nested header still leads the plugin to the body',
+    nested.thinkBody.className.split(' ').includes('dsh-th-body'),
+    JSON.stringify(nested.thinkBody.className),
+  )
+  check('0.2.1’s body is marked', hitsIn(nested.thinkBody) === 3, hitsIn(nested.thinkBody) + ' hits')
+  check(
+    '0.2.1’s chips sit on the line, after the title and before the preview',
+    nested.line.querySelectorAll('[data-dsh-th="badges"]')[0]?.parentNode === nested.contentLine &&
+      nested.line.querySelectorAll('[data-dsh-th="badges"]')[0]?.nextElementSibling === nested.summary,
+    String(nested.line.querySelectorAll('[data-dsh-th="badges"]')[0]?.parentNode === nested.contentLine),
+  )
+
+  /* Collapsed: no body is mounted, so nothing may be stamped or marked. */
+  const folded = newHostRow({ expanded: false, bodyText: '' })
+  runtime0().pass()
+  check(
+    '0.2.1’s folded row grows no body of its own',
+    folded.root.querySelector('.dsh-th-body') === null && folded.line.querySelectorAll('[data-dsh-th="hit"]').length === 0,
+    JSON.stringify(folded.root.querySelector('.dsh-th-body') === null),
+  )
+  check(
+    'and its chips still draw on the collapsed line',
+    folded.line.querySelectorAll('[data-dsh-th="badges"]').length === 1,
+    String(folded.line.querySelectorAll('[data-dsh-th="badges"]').length),
+  )
+
+  /*
+   * The official reasoning-translation plugin claims the body slot and renders
+   * `[data-cot-translation] > (toolbar, content)`. The toolbar is chrome, and the
+   * content is what the reader is actually reading — so the marks and the counts
+   * both have to live there and nowhere else.
+   */
+  const translated = newHostRow({ expanded: true, bodyText: '提示词与但，提示词再一次。' })
+  const wrapper = new StubElement('div')
+  wrapper.setAttribute('data-cot-translation', '')
+  wrapper.setAttribute('data-translation-view', 'translated')
+  const toolbar = new StubElement('div')
+  const viewToggle = new StubElement('button')
+  viewToggle.textContent = '看但的提示词原文'
+  toolbar.appendChild(viewToggle)
+  const shown = new StubElement('div')
+  shown.appendChild(new StubText('译文：提示词与但。'))
+  wrapper.appendChild(toolbar)
+  wrapper.appendChild(shown)
+  translated.thinkBody.textContent = ''
+  translated.thinkBody.appendChild(wrapper)
+  runtime0().pass()
+  check('a translated reasoning body is marked at all', hitsIn(shown) === 2, hitsIn(shown) + ' hits')
+  check('the translation toolbar is never marked', hitsIn(toolbar) === 0, hitsIn(toolbar) + ' hits')
+  check(
+    'the chips count what the translated body shows',
+    runtime0().rows().at(-1)?.count === 2,
+    JSON.stringify(runtime0().rows().at(-1)?.count),
+  )
+  check(
+    'no cached body text was left behind by the chrome',
+    translated.root.querySelector('.dsh-th-body') === translated.thinkBody,
+    JSON.stringify(translated.root.querySelector('.dsh-th-body') === translated.thinkBody),
+  )
+
+  /* Switching back to the original text re-marks it, and the counts follow. */
+  shown.textContent = '原文：提示词与但，提示词再一次。'
+  runtime0().pass()
+  check('switching the translated view back to the original re-marks it', hitsIn(shown) === 3, hitsIn(shown) + ' hits')
+  check(
+    'and the counts follow the view',
+    runtime0().rows().at(-1)?.count === 3,
+    JSON.stringify(runtime0().rows().at(-1)?.count),
+  )
 }
 
 let failed = 0

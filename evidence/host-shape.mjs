@@ -286,7 +286,7 @@ function boot() {
 }
 
 /** Build one row exactly the way the installed ReasoningRow renders it. */
-function buildRow(body, { running = false, expanded = false, text = BODY_TEXT } = {}) {
+function buildRow(body, { running = false, expanded = false, text = BODY_TEXT, nested = false } = {}) {
   const doc = globalThis.document
   const row = doc.createElement('div')
   row.setAttribute('data-variant', 'think')
@@ -300,6 +300,14 @@ function buildRow(body, { running = false, expanded = false, text = BODY_TEXT } 
   }
   const disclosure = doc.createElement('div')
   if (expanded) disclosure.setAttribute('data-open', '')
+  /*
+   * DSH 0.2.1 nests the text line one level deeper, in a
+   * `[data-disclosure-header]` block, and renders the body as that block's
+   * sibling. Before 0.2.1 the line was the disclosure's own child and the body
+   * followed it directly.
+   */
+  const lineParent = nested ? doc.createElement('div') : disclosure
+  if (nested) lineParent.setAttribute('data-disclosure-header', '')
   const line = doc.createElement('div')
   line.setAttribute('data-disclosure-row', '')
   const leading = doc.createElement('span')
@@ -318,7 +326,8 @@ function buildRow(body, { running = false, expanded = false, text = BODY_TEXT } 
   contentRoot.appendChild(contentLine)
   line.appendChild(leading)
   line.appendChild(contentRoot)
-  disclosure.appendChild(line)
+  lineParent.appendChild(line)
+  if (nested) disclosure.appendChild(lineParent)
   let thinkBody = null
   let hostText = null
   if (expanded) {
@@ -421,6 +430,36 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
   check('the same body carries the stamp', thinkBody.classList.contains('dsh-th-body'), thinkBody.className)
 }
 
+/* ──────────── 4b. the shape DSH 0.2.1 actually renders ────────────────── */
+{
+  const host = boot()
+  const row = buildRow(host.body, { running: false, expanded: true, nested: true })
+  host.runtime.pass()
+  check(
+    'a 0.2.1 row (line nested in [data-disclosure-header]) is still highlighted',
+    hits(row.thinkBody).length === 2,
+    String(hits(row.thinkBody).length) + ' hits',
+  )
+  check(
+    'and the stamp is on the 0.2.1 body, not on the header block',
+    row.thinkBody.classList.contains('dsh-th-body') && row.disclosure.firstElementChild.classList.contains('dsh-th-body') === false,
+    row.thinkBody.className,
+  )
+  check(
+    'the 0.2.1 chip set still sits on the text line',
+    mounts(row.line).length === 1 && mounts(row.thinkBody).length === 0,
+    'line ' + mounts(row.line).length + ', body ' + mounts(row.thinkBody).length,
+  )
+  const folded = buildRow(host.body, { running: false, expanded: false, nested: true })
+  host.runtime.pass()
+  check(
+    'a folded 0.2.1 row grows no body stamp',
+    folded.disclosure.querySelectorAll('.dsh-th-body').length === 0,
+    String(folded.disclosure.querySelectorAll('.dsh-th-body').length),
+  )
+  check('and still shows its chip set', mounts(folded.line).length === 1, String(mounts(folded.line).length))
+}
+
 /* ─────────────────── 5. unload leaves no trace on the host ────────────── */
 {
   const body = new StubElement('body')
@@ -504,10 +543,18 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
 
 /* ─────────── 6. the installed build still renders what we model ────────── */
 {
+  /*
+   * The desktop app installs to a different place on every machine and has moved
+   * once already (from `%LOCALAPPDATA%\Programs` into the harness's own directory),
+   * so the archive is located rather than assumed: the first candidate that exists
+   * is the installed host.
+   */
   const candidates = [
+    process.env.DSH_ASAR ?? '',
+    'D:/DeepSeek/resources/app.asar',
     'C:/Users/Yokira/AppData/Local/Programs/DeepSeek Harness/resources/app.asar',
     join(root, '..', '..', 'resources', 'app.asar'),
-  ]
+  ].filter((path) => path !== '')
   const archive = candidates.find((path) => existsSync(path))
   if (archive === undefined) {
     console.log('SKIP  the DSH app.asar was not found, so the installed markers were not checked')
@@ -529,30 +576,74 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
         }
         return out
       }
-      const wanted = [
-        'dsh-client-ui-chat/lib/client.js',
-        'dsh-client-ui-primitives/lib/index.js',
-        /* Where the reader's content font size is published on `body`, as an inline length. */
-        'dsh-client-ui-layout/lib/client.js',
-      ]
-      const entries = collect(header, '', []).filter((entry) => wanted.some((needle) => entry.path.endsWith(needle)))
-      check('the installed host bundles were found', entries.length === wanted.length, String(entries.length) + '/' + String(wanted.length))
-      for (const entry of entries) {
-        const buf = Buffer.alloc(Math.min(entry.size, 700000))
+      const entries = collect(header, '', [])
+      const find = (predicate) => entries.find(predicate)
+      const readEntry = (entry, cap = 900000) => {
+        const buf = Buffer.alloc(Math.min(entry.size, cap))
         readSync(fd, buf, 0, buf.length, baseOffset + entry.offset)
-        const text = buf.toString('utf8')
-        const isChat = entry.path.endsWith('ui-chat/lib/client.js')
-        const isLayout = entry.path.endsWith('ui-layout/lib/client.js')
-        const needles = isChat
-          ? ['"data-variant": "think"', 'data-expanded', 'data-turn-process-inline']
-          : isLayout
-            ? ['--dsh-content-font-size', 'setProperty']
-            : ['"data-disclosure-row": true', '"data-open": open || void 0', 'open && children']
-        for (const needle of needles) {
+        return buf.toString('utf8')
+      }
+      /* The reasoning row: the markup every decoration hangs off. */
+      const chat = find((entry) => entry.path.endsWith('dsh-client-ui-chat/lib/client.js'))
+      /* DisclosureRow: shipped inside the web shell since 0.2.1, not as its own bundle. */
+      const shell = find((entry) => entry.path.includes('dsh-web-frontend/dist/assets/index-') && entry.path.endsWith('.js'))
+      /* The reader's content font size, published on `body`. */
+      const layout = find((entry) => entry.path.endsWith('dsh-client-ui-layout/lib/client.js'))
+      check(
+        'the installed host bundles were found',
+        chat !== undefined && shell !== undefined && layout !== undefined,
+        JSON.stringify({ chat: chat?.path ?? null, shell: shell?.path ?? null, layout: layout?.path ?? null }),
+      )
+      if (chat !== undefined) {
+        const text = readEntry(chat)
+        for (const needle of ['"data-variant": "think"', 'data-expanded', 'data-turn-process-inline', 'conversation.chat.reasoning.body', 'MarkdownText']) {
           check(
-            'the installed build still contains ' + JSON.stringify(needle),
+            'the installed reasoning row still contains ' + JSON.stringify(needle),
             text.includes(needle),
-            entry.path + (text.includes(needle) ? '' : ' — the host markup this plugin addresses may have changed'),
+            chat.path + (text.includes(needle) ? '' : ' — the host markup this plugin addresses may have changed'),
+          )
+        }
+      }
+      if (shell !== undefined) {
+        const text = readEntry(shell)
+        /*
+         * `[data-disclosure-header]` is new in 0.2.1: it sits between `[data-open]` and
+         * `[data-disclosure-row]`, which is exactly the level that used to hide the
+         * body from the plugin. Its absence would mean the shape went back — and the
+         * body lookup has to go with it.
+         */
+        for (const needle of ['"data-disclosure-row":!0', '"data-disclosure-header":!0', '"data-open":']) {
+          check(
+            'the installed disclosure still renders ' + JSON.stringify(needle),
+            text.includes(needle),
+            shell.path + (text.includes(needle) ? '' : ' — the disclosure shape changed; re-derive bodyOf against it'),
+          )
+        }
+      }
+      if (layout !== undefined) {
+        const text = readEntry(layout)
+        check(
+          'the installed layout still publishes the content font size on the body',
+          text.includes('--dsh-content-font-size') && text.includes('setProperty'),
+          layout.path,
+        )
+      }
+      /*
+       * DSH's own reasoning translation claims the same body the plugin decorates.
+       * It ships as an optional bundle: when it is installed, the wrapper and the
+       * inner content slot are what the plugin has to keep out of its chrome and
+       * count from, so the shape is asserted only when the bundle is there.
+       */
+      const cot = find((entry) => entry.path.endsWith('dsh-experimental-client-ui-cot-translation/lib/client.js'))
+      if (cot === undefined) {
+        console.log('NOTE  the official reasoning-translation bundle is not installed; its compatibility shape was not checked')
+      } else {
+        const text = readEntry(cot)
+        for (const needle of ['"data-cot-translation": "true"', '"data-translation-view"', 'conversation.chat.reasoning.body', 'conversation.chat.reasoning.content']) {
+          check(
+            'the translation plugin still renders ' + JSON.stringify(needle),
+            text.includes(needle),
+            cot.path + (text.includes(needle) ? '' : ' — the plugin\'s toolbar/content split changed; re-derive reasoningRootOf'),
           )
         }
       }
@@ -563,22 +654,19 @@ const hits = (element) => element.querySelectorAll('[data-dsh-th="hit"]')
        * that range turns into a failing test instead of a plugin whose arrows disagree
        * with the reader's own text size.
        */
-      const theme = collect(header, '', []).find((entry) => entry.path.endsWith('dsh-client-ui-theme/lib/client.js'))
+      const theme = find((entry) => entry.path.endsWith('dsh-client-ui-theme/lib/client.js'))
       if (theme === undefined) {
         console.log('SKIP  the theme bundle was not found, so the host font-size range was not checked')
       } else {
-        const buf = Buffer.alloc(theme.size)
-        readSync(fd, buf, 0, buf.length, baseOffset + theme.offset)
-        const text = buf.toString('utf8')
+        const text = readEntry(theme)
         check(
-          'the installed theme still defines the content font size as 10–22 px, stepping by 1, default 14',
-          text.includes('Schema.number().step(1).min(10).max(22).default(14)') ||
-            /\.step\(1\)\.min\(10\)\.max\(22\)\.default\(14\)/.test(text),
+          'the installed theme still defines the content font size as 10–22 px and a default of 14',
+          /"--dsh-content-font-size"[\s\S]{0,160}?min:\s*10[\s\S]{0,80}?max:\s*22[\s\S]{0,80}?default:\s*14/.test(text),
           theme.path + ' — the plugin\'s size range is the host\'s; if this changed, change FONT_SIZE_MIN/MAX with it',
         )
         check(
           'and its own stepper still stops at those two ends',
-          text.includes('fontSize >= 22') && text.includes('fontSize <= 10'),
+          text.includes('fontSize >= max') && text.includes('fontSize <= min'),
           theme.path,
         )
         /*
